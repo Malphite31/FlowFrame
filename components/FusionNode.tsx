@@ -75,6 +75,7 @@ const getShotTypeIcon = (shotType?: string) => {
 const FusionNode = ({ id, data, selected }: NodeProps<StoryNodeData>) => {
   const isIdea = data.variant === 'idea';
   const isMood = data.variant === 'mood';
+  const isLink = data.variant === 'link';
   const { updateNodeData } = useReactFlow();
   const { aspectRatio } = useSettings(); // Global Aspect Ratio
   const [isDragOver, setIsDragOver] = useState(false);
@@ -129,20 +130,88 @@ const FusionNode = ({ id, data, selected }: NodeProps<StoryNodeData>) => {
   );
 
   // --- DYNAMIC DIMENSIONS BASED ON ASPECT RATIO ---
-  // Calculates the node width and preview height to match the selected ratio
   const getDimensions = () => {
     switch (aspectRatio) {
       case '9:16':
-        return { widthClass: 'w-48', heightClass: 'h-[340px]', previewHeightClass: 'h-[270px]' }; // Tall Portrait
+        return { widthClass: 'w-48', heightClass: 'h-[340px]', previewHeightClass: 'h-[270px]' };
       case '1:1':
-        return { widthClass: 'w-56', heightClass: 'h-auto', previewHeightClass: 'h-56' }; // Square
+        return { widthClass: 'w-56', heightClass: 'h-auto', previewHeightClass: 'h-56' };
       case '16:9':
       default:
-        return { widthClass: 'w-64', heightClass: 'h-auto', previewHeightClass: 'h-36' }; // Standard Landscape
+        return { widthClass: 'w-64', heightClass: 'h-auto', previewHeightClass: 'h-36' };
     }
   };
 
   const { widthClass, heightClass, previewHeightClass } = getDimensions();
+
+  // --- STYLE FOR LINK NODES (FIGMA STYLE) ---
+  if (isLink) {
+    return (
+      <div
+        onDragOver={onDragOver}
+        onDragLeave={onDragLeave}
+        onDrop={onDrop}
+        className={`
+          relative w-72 rounded-lg bg-[#262626] flex flex-col overflow-hidden transition-all duration-300
+          ${selected 
+            ? 'ring-2 ring-davinci-accent shadow-[0_0_20px_rgba(94,154,255,0.3)]' 
+            : 'shadow-lg border border-[#3d3d3d] hover:border-gray-500'}
+        `}
+      >
+        <Handle
+          type="target"
+          position={Position.Left}
+          className="!w-3 !h-3 !bg-white/10 !border-0 hover:!bg-davinci-accent transition-colors"
+          style={{ left: '-5px', opacity: 0.5 }}
+        />
+        
+        {/* Thumbnail Area */}
+        {data.linkImage ? (
+          <div className="h-32 w-full bg-black relative">
+             <img src={data.linkImage} alt="Link Preview" className="w-full h-full object-cover opacity-90" draggable={false} />
+             <div className="absolute inset-0 ring-1 ring-inset ring-white/10"></div>
+          </div>
+        ) : (
+          <div className="h-16 w-full bg-[#1a1a1a] flex items-center justify-center border-b border-[#3d3d3d]">
+             <svg className="w-6 h-6 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" /></svg>
+          </div>
+        )}
+
+        {/* Content Area */}
+        <div className="p-3 flex flex-col gap-1">
+           <div className="flex items-start justify-between gap-2">
+              <span className="text-sm font-bold text-gray-200 leading-tight line-clamp-2">{data.linkTitle || data.label}</span>
+              {/* External Link Icon Button */}
+              <a 
+                href={data.linkUrl} 
+                target="_blank" 
+                rel="noopener noreferrer"
+                className="flex-shrink-0 text-gray-500 hover:text-davinci-accent transition-colors bg-[#121212] p-1 rounded"
+                title="Open Link"
+                onMouseDown={(e) => e.stopPropagation()} // Prevent node selection when clicking link
+              >
+                 <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+              </a>
+           </div>
+           
+           <span className="text-[10px] text-davinci-accent/80 font-mono truncate">{data.linkDomain}</span>
+           
+           {data.linkDescription && (
+             <p className="text-[10px] text-gray-500 line-clamp-2 mt-1 leading-relaxed">
+               {data.linkDescription}
+             </p>
+           )}
+        </div>
+        
+        <Handle
+          type="source"
+          position={Position.Right}
+          className="!w-3 !h-3 !bg-white/10 !border-0 hover:!bg-davinci-accent transition-colors"
+          style={{ right: '-5px', opacity: 0.5 }}
+        />
+      </div>
+    );
+  }
 
   // --- STYLE FOR MOOD BOARD NODES ---
   if (isMood) {
@@ -153,6 +222,12 @@ const FusionNode = ({ id, data, selected }: NodeProps<StoryNodeData>) => {
         onDrop={onDrop}
         className={`relative group transition-all duration-300 ease-out ${selected ? 'z-10' : ''}`}
       >
+        <Handle
+          type="target"
+          position={Position.Left}
+          className="!w-3 !h-3 !bg-white/20 !border-0 hover:!bg-davinci-accent"
+          style={{ left: '-5px', opacity: 0 }}
+        />
         <div className={`
             overflow-hidden rounded-lg bg-[#121212] transition-all duration-300 ease-out flex items-center justify-center
             ${selected 
@@ -185,6 +260,12 @@ const FusionNode = ({ id, data, selected }: NodeProps<StoryNodeData>) => {
         <div className={`absolute -bottom-6 left-1/2 -translate-x-1/2 px-2 py-0.5 bg-[#181818]/90 border border-[#333] text-gray-300 text-[9px] rounded-full transition-opacity pointer-events-none whitespace-nowrap shadow-md z-10 ${selected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
           {data.label || 'Mood Node'}
         </div>
+        <Handle
+          type="source"
+          position={Position.Right}
+          className="!w-3 !h-3 !bg-white/20 !border-0 hover:!bg-davinci-accent"
+          style={{ right: '-5px', opacity: 0 }}
+        />
       </div>
     );
   }

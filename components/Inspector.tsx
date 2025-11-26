@@ -1,3 +1,4 @@
+
 import React, { useCallback, useState } from 'react';
 import { Node } from '@xyflow/react';
 import { StoryNodeData, NODE_COLORS, AspectRatio, ShotType } from '../types';
@@ -98,6 +99,7 @@ const Inspector: React.FC<InspectorProps> = ({ selectedNode, onUpdateNode, aspec
 
   const { data, id } = selectedNode;
   const isGroup = data.variant === 'group';
+  const isLink = data.variant === 'link';
 
   return (
     <div className="w-80 bg-[#262626] border-l border-black flex flex-col h-full">
@@ -118,7 +120,7 @@ const Inspector: React.FC<InspectorProps> = ({ selectedNode, onUpdateNode, aspec
       <div className="p-4 flex flex-col gap-6 overflow-y-auto custom-scrollbar">
         
         {/* Node Type Selector (Hide for Group) */}
-        {!isGroup && (
+        {!isGroup && !isLink && (
           <div className="flex bg-[#121212] p-1 rounded border border-[#3d3d3d]">
             <button 
               onClick={() => onUpdateNode(id, { variant: 'scene' })}
@@ -152,7 +154,41 @@ const Inspector: React.FC<InspectorProps> = ({ selectedNode, onUpdateNode, aspec
           />
         </div>
 
+        {/* LINK SPECIFIC FIELDS */}
+        {isLink && (
+            <div className="flex flex-col gap-4 border-b border-[#3d3d3d] pb-4">
+                <div className="flex flex-col gap-2">
+                   <label className="text-xs text-gray-400 font-bold uppercase">URL</label>
+                   <input 
+                      type="text" 
+                      value={data.linkUrl || ''}
+                      onChange={(e) => onUpdateNode(id, { linkUrl: e.target.value })}
+                      className="bg-[#121212] border border-[#3d3d3d] text-davinci-accent p-2 rounded text-xs focus:border-davinci-accent outline-none font-mono"
+                   />
+                </div>
+                <div className="flex flex-col gap-2">
+                   <label className="text-xs text-gray-400 font-bold uppercase">Preview Title</label>
+                   <input 
+                      type="text" 
+                      value={data.linkTitle || ''}
+                      onChange={(e) => onUpdateNode(id, { linkTitle: e.target.value })}
+                      className="bg-[#121212] border border-[#3d3d3d] text-white p-2 rounded text-sm focus:border-davinci-accent outline-none"
+                   />
+                </div>
+                <div className="flex flex-col gap-2">
+                   <label className="text-xs text-gray-400 font-bold uppercase">Description</label>
+                   <textarea 
+                      value={data.linkDescription || ''}
+                      onChange={(e) => onUpdateNode(id, { linkDescription: e.target.value })}
+                      rows={3}
+                      className="bg-[#121212] border border-[#3d3d3d] text-gray-300 p-2 rounded text-sm focus:border-davinci-accent outline-none resize-none"
+                   />
+                </div>
+            </div>
+        )}
+
         {/* Color Picker */}
+        {!isLink && (
         <div className="flex flex-col gap-2">
           <label className="text-xs text-gray-400 font-bold uppercase">{isGroup ? 'Group Color' : 'Node Color'}</label>
           <div className="flex gap-2 flex-wrap">
@@ -167,6 +203,7 @@ const Inspector: React.FC<InspectorProps> = ({ selectedNode, onUpdateNode, aspec
             ))}
           </div>
         </div>
+        )}
 
         {/* Shot Type Selector (Only for Scenes) */}
         {(!data.variant || data.variant === 'scene') && !isGroup && (
@@ -212,8 +249,8 @@ const Inspector: React.FC<InspectorProps> = ({ selectedNode, onUpdateNode, aspec
           </div>
         )}
 
-        {/* Script & Duration (Hidden for Mood and Group) */}
-        {data.variant !== 'mood' && !isGroup && (
+        {/* Script & Duration (Hidden for Mood, Group, Link) */}
+        {data.variant !== 'mood' && data.variant !== 'link' && !isGroup && (
           <div className="flex flex-col gap-2">
             <div className="flex justify-between items-center">
               <label className="text-xs text-gray-400 font-bold uppercase">

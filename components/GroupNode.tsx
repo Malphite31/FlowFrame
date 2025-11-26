@@ -1,3 +1,4 @@
+
 import React, { memo } from 'react';
 import { NodeProps, NodeResizer } from '@xyflow/react';
 import { StoryNodeData } from '../types';
@@ -18,14 +19,14 @@ const GroupNode = ({ data, selected }: NodeProps<StoryNodeData>) => {
         `}
       >
         <div 
-            className="w-full px-4 py-2 rounded-t-lg bg-[#3d3d3d]/50 border-b border-transparent flex items-center justify-between"
-            style={{ backgroundColor: data.color ? `${data.color}40` : '#3d3d3d40' }}
+            className="w-full px-4 py-2 rounded-t-lg bg-[#3d3d3d]/80 border-b border-transparent flex items-center justify-between"
+            style={{ backgroundColor: data.color ? `${data.color}40` : '#3d3d3d80' }}
         >
-          <span className="text-xs font-bold text-gray-300 tracking-wider uppercase">
+          <span className="text-sm font-bold text-white tracking-wider uppercase drop-shadow-md truncate" title="Group Name">
             {data.label || 'Group'}
           </span>
           {data.color && (
-            <div className="w-2 h-2 rounded-full opacity-80" style={{ backgroundColor: data.color }} />
+            <div className="w-2 h-2 rounded-full opacity-100 ring-1 ring-white/20" style={{ backgroundColor: data.color }} />
           )}
         </div>
         <div className="flex-1 w-full h-full relative -z-10">

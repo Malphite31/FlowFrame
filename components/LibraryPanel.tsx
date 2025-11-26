@@ -2,6 +2,8 @@
 import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { Node } from '@xyflow/react';
 import { StoryNodeData, NODE_COLORS, Asset, MediaType } from '../types';
+import { generateUUID } from '../utils/exportUtils';
+import { fetchLinkMetadata, isValidURL } from '../utils/linkUtils';
 import { 
   hexToHSL, 
   hslToHex, 
@@ -18,12 +20,13 @@ interface LibraryPanelProps {
   onApplyColor: (color: string) => void;
   assets: Asset[];
   onAddAssets: (files: FileList) => void;
+  onAddAsset: (asset: Asset) => void;
   onUpdateAsset: (id: string, updates: Partial<Asset>) => void;
   onDeleteAsset: (id: string) => void;
 }
 
 export const LibraryPanel: React.FC<LibraryPanelProps> = ({ 
-  nodes, projectNotes, setProjectNotes, onApplyColor, assets, onAddAssets, onUpdateAsset, onDeleteAsset
+  nodes, projectNotes, setProjectNotes, onApplyColor, assets, onAddAssets, onAddAsset, onUpdateAsset, onDeleteAsset
 }) => {
   const [activeTab, setActiveTab] = useState<'assets' | 'notes' | 'colors'>('assets');
   
@@ -34,6 +37,10 @@ export const LibraryPanel: React.FC<LibraryPanelProps> = ({
   const [sortBy, setSortBy] = useState<'date' | 'name'>('date');
   const [selectedAssetId, setSelectedAssetId] = useState<string | null>(null);
   const [tagInput, setTagInput] = useState('');
+  
+  // Link Input State
+  const [linkInput, setLinkInput] = useState('');
+  const [isAddingLink, setIsAddingLink] = useState(false);
 
   // -- Color Studio State --
   const [colorState, setColorState] = useState({ h: 237, s: 100, l: 50 });
@@ -173,11 +180,42 @@ export const LibraryPanel: React.FC<LibraryPanelProps> = ({
       }
   };
 
+  const handleAddLink = async () => {
+    if (!linkInput || !isValidURL(linkInput)) return;
+    setIsAddingLink(true);
+    
+    try {
+        const meta = await fetchLinkMetadata(linkInput);
+        onAddAsset({
+            id: generateUUID(),
+            type: 'link',
+            url: linkInput,
+            name: meta.title || linkInput,
+            tags: ['link'],
+            dateAdded: Date.now(),
+            meta: {
+                title: meta.title,
+                description: meta.description,
+                image: meta.image
+            }
+        });
+        setLinkInput('');
+    } catch (e) {
+        console.error("Failed to add link asset", e);
+    } finally {
+        setIsAddingLink(false);
+    }
+  };
+
   const handleAssetDragStart = (event: React.DragEvent, asset: Asset) => {
     event.dataTransfer.setData('application/reactflow/type', 'asset');
     event.dataTransfer.setData('application/reactflow/id', asset.id);
     event.dataTransfer.setData('application/reactflow/mediaType', asset.type);
     event.dataTransfer.setData('application/reactflow/source', asset.url);
+    if (asset.type === 'link' && asset.meta) {
+         // Pass metadata for link nodes
+         event.dataTransfer.setData('application/reactflow/linkMeta', JSON.stringify(asset.meta));
+    }
     event.dataTransfer.effectAllowed = 'copy';
   };
 
@@ -210,6 +248,84 @@ export const LibraryPanel: React.FC<LibraryPanelProps> = ({
      }
   };
 
+  // Apply a harmony color to selected nodes without mutating the base picker state
+  const handleHarmonyApply = (color: string) => {
+      onApplyColor(color);
+  };
+
+  const handleExportPalette = () => {
+    if (savedColors.length === 0) return;
+    
+    const canvas = document.createElement('canvas');
+    const padding = 20;
+    const swatchSize = 60;
+    const gap = 15;
+    const cols = 5;
+    const rows = Math.ceil(savedColors.length / cols);
+    const headerHeight = 60;
+    
+    canvas.width = (padding * 2) + (cols * swatchSize) + ((cols - 1) * gap);
+    canvas.height = headerHeight + (padding) + (rows * (swatchSize + 20)) + ((rows - 1) * gap);
+    
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    
+    // Bg
+    ctx.fillStyle = '#1e1e1e';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    
+    // Header
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 16px sans-serif';
+    ctx.fillText('Project Palette', padding, 30);
+    ctx.fillStyle = '#666';
+    ctx.font = '12px sans-serif';
+    ctx.fillText(new Date().toLocaleDateString(), padding, 50);
+    
+    // Swatches
+    savedColors.forEach((color, i) => {
+        const col = i % cols;
+        const row = Math.floor(i / cols);
+        const x = padding + col * (swatchSize + gap);
+        const y = headerHeight + row * (swatchSize + gap + 20);
+        
+        // Draw Color
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        if (ctx.roundRect) {
+            ctx.roundRect(x, y, swatchSize, swatchSize, 8);
+        } else {
+            ctx.rect(x,y,swatchSize,swatchSize);
+        }
+        ctx.fill();
+        
+        // Draw Border
+        ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        
+        // Draw Hex
+        ctx.fillStyle = '#888';
+        ctx.font = '10px monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText(color.toUpperCase(), x + (swatchSize/2), y + swatchSize + 14);
+    });
+    
+    const url = canvas.toDataURL('image/png');
+    
+    onAddAsset({
+        id: generateUUID(),
+        type: 'image',
+        url,
+        name: `Palette_${Date.now()}.png`,
+        tags: ['palette', 'generated'],
+        dateAdded: Date.now()
+    });
+    
+    // Switch to assets tab
+    setActiveTab('assets');
+  };
+
   // Helper for rendering harmony swatches
   const renderSwatches = (colors: string[], label: string) => (
     <div className="flex flex-col gap-1">
@@ -218,13 +334,15 @@ export const LibraryPanel: React.FC<LibraryPanelProps> = ({
         {colors.map(c => (
            <div 
              key={c} 
-             onClick={() => handleColorClick(c)} 
+             onClick={() => handleHarmonyApply(c)} 
              className="h-6 flex-1 rounded-sm cursor-pointer border border-black/20 hover:scale-105 hover:z-10 transition-transform relative group" 
              style={{ background: c }} 
+             title={`${label}: ${c.toUpperCase()} (click to apply without changing picker)`}
            >
              <div className="absolute inset-0 opacity-0 group-hover:opacity-100 bg-black/20 flex items-center justify-center">
                 <div className="w-1 h-1 bg-white rounded-full"></div>
              </div>
+             <span className="absolute bottom-0 right-0 text-[8px] text-white/70 px-1 bg-black/40 rounded-tl hidden group-hover:inline">Apply</span>
            </div>
         ))}
       </div>
@@ -273,6 +391,29 @@ export const LibraryPanel: React.FC<LibraryPanelProps> = ({
                     <input type="file" className="hidden" multiple accept="image/*,video/*,audio/*" onChange={handleFileUpload} />
                 </label>
 
+                {/* Add Link Input */}
+                <div className="flex gap-1">
+                    <input 
+                        type="text" 
+                        value={linkInput}
+                        onChange={(e) => setLinkInput(e.target.value)}
+                        placeholder="Paste URL to add link asset..."
+                        className="flex-1 bg-[#121212] border border-[#3d3d3d] rounded px-2 py-1.5 text-xs text-white focus:border-davinci-accent outline-none"
+                    />
+                    <button 
+                        onClick={handleAddLink}
+                        disabled={isAddingLink || !linkInput}
+                        className="bg-[#3d3d3d] hover:bg-davinci-accent hover:text-black text-white px-2 rounded disabled:opacity-50 transition-colors"
+                        title="Add Link Asset"
+                    >
+                        {isAddingLink ? (
+                            <div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                        ) : (
+                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4" /></svg>
+                        )}
+                    </button>
+                </div>
+
                 {/* Filters */}
                 <div className="flex flex-col gap-2 bg-[#1a1a1a] p-2 rounded border border-[#3d3d3d]">
                    <input 
@@ -284,7 +425,7 @@ export const LibraryPanel: React.FC<LibraryPanelProps> = ({
                    />
                    <div className="flex justify-between items-center">
                       <div className="flex gap-1">
-                          {(['all', 'image', 'video', 'audio'] as const).map(type => (
+                          {(['all', 'image', 'video', 'audio', 'link'] as const).map(type => (
                              <button 
                                key={type}
                                onClick={() => setFilterType(type)}
@@ -295,6 +436,7 @@ export const LibraryPanel: React.FC<LibraryPanelProps> = ({
                                 {type === 'image' && <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>}
                                 {type === 'video' && <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>}
                                 {type === 'audio' && <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" /></svg>}
+                                {type === 'link' && <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" /></svg>}
                              </button>
                           ))}
                       </div>
@@ -342,7 +484,30 @@ export const LibraryPanel: React.FC<LibraryPanelProps> = ({
                                              <svg className="w-8 h-8 text-davinci-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" /></svg>
                                          </div>
                                       )}
-                                      <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-end p-2">
+                                      {asset.type === 'link' && (
+                                         <>
+                                            {asset.meta?.image ? (
+                                                <img src={asset.meta.image} className="w-full h-full object-cover opacity-80" loading="lazy" />
+                                            ) : (
+                                                <div className="flex flex-col items-center justify-center gap-2 p-2 bg-[#222]">
+                                                    <svg className="w-8 h-8 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" /></svg>
+                                                    <span className="text-[9px] text-gray-500 break-all text-center px-1">{new URL(asset.url).hostname.replace('www.','')}</span>
+                                                </div>
+                                            )}
+                                            {/* Open Link Button Overlay */}
+                                            <a 
+                                                href={asset.url} 
+                                                target="_blank" 
+                                                rel="noreferrer"
+                                                onClick={(e) => e.stopPropagation()}
+                                                className="absolute top-1 right-1 p-1 bg-black/60 hover:bg-davinci-accent hover:text-black text-white rounded opacity-0 group-hover:opacity-100 transition-opacity z-10"
+                                                title="Open Link"
+                                            >
+                                                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+                                            </a>
+                                         </>
+                                      )}
+                                      <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-end p-2 pointer-events-none">
                                           <span className="text-[9px] text-white font-bold truncate w-full">{asset.name}</span>
                                       </div>
                                   </div>
@@ -529,13 +694,23 @@ export const LibraryPanel: React.FC<LibraryPanelProps> = ({
                   <div className="border-t border-[#3d3d3d] pt-4">
                       <div className="flex justify-between items-center mb-2">
                           <h3 className="text-[10px] text-gray-500 font-bold uppercase">Saved Palette</h3>
-                          <button 
-                             onClick={saveCurrentColor}
-                             className="text-[10px] bg-[#333] hover:bg-[#444] px-2 py-0.5 rounded text-white transition-colors flex items-center gap-1"
-                          >
-                             <span>+ Save</span>
-                             <div className="w-2 h-2 rounded-full" style={{ backgroundColor: hexInput }}></div>
-                          </button>
+                          <div className="flex gap-2">
+                              {savedColors.length > 0 && (
+                                  <button 
+                                      onClick={handleExportPalette}
+                                      className="text-[10px] bg-davinci-accent/20 text-davinci-accent hover:bg-davinci-accent/40 px-2 py-0.5 rounded transition-colors"
+                                  >
+                                      Export as Asset
+                                  </button>
+                              )}
+                              <button 
+                                 onClick={saveCurrentColor}
+                                 className="text-[10px] bg-[#333] hover:bg-[#444] px-2 py-0.5 rounded text-white transition-colors flex items-center gap-1"
+                              >
+                                 <span>+ Save</span>
+                                 <div className="w-2 h-2 rounded-full" style={{ backgroundColor: hexInput }}></div>
+                              </button>
+                          </div>
                       </div>
                       <div className="grid grid-cols-6 gap-2">
                         {savedColors.map((color, idx) => (

@@ -6,16 +6,23 @@ export interface StoryNodeData {
   image: string | null;
   fileName: string | null;
   color: string; // Hex color for markers
-  variant?: 'scene' | 'idea' | 'mood' | 'group';
+  variant?: 'scene' | 'idea' | 'mood' | 'group' | 'link';
   shotType?: ShotType;
   mediaType?: MediaType; // New field for video/audio support
+  
+  // Link specific data
+  linkUrl?: string;
+  linkTitle?: string;
+  linkDescription?: string;
+  linkDomain?: string;
+  linkImage?: string;
 }
 
 export type AspectRatio = '16:9' | '9:16' | '1:1';
 
 export type ShotType = 'WS' | 'wide' | 'med' | 'MCU' | 'CU' | 'ECU' | 'pov' | 'drone' | 'est';
 
-export type MediaType = 'image' | 'video' | 'audio';
+export type MediaType = 'image' | 'video' | 'audio' | 'link';
 
 export interface Asset {
   id: string;
@@ -24,6 +31,11 @@ export interface Asset {
   name: string;
   tags: string[];
   dateAdded: number;
+  meta?: {
+    title?: string;
+    description?: string;
+    image?: string;
+  };
 }
 
 export interface Marker {

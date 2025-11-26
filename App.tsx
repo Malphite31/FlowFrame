@@ -1,5 +1,5 @@
 
-import React, { useState, useCallback, useMemo, useEffect } from 'react';
+import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import {
   ReactFlow,
   Controls,
@@ -23,13 +23,18 @@ import {
 
 import FusionNode from './components/FusionNode';
 import GroupNode from './components/GroupNode';
-import TopBar from './components/TopBar';
+import TopBar, { ViewMode } from './components/TopBar';
+import Dashboard from './components/Dashboard';
 import Inspector from './components/Inspector';
 import ContextMenu from './components/ContextMenu';
 import { PresentationMode } from './components/PresentationMode';
 import { LibraryPanel } from './components/LibraryPanel';
+import { TimelinePanel } from './components/TimelinePanel';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { StoryNodeData, NODE_COLORS, AspectRatio, Asset, MediaType } from './types';
 import { generateUUID, sortNodesByTimeline, getExportableNodes } from './utils/exportUtils';
+import { isValidURL, fetchLinkMetadata, getDomain } from './utils/linkUtils';
+import { getLayoutedElements } from './utils/layoutUtils';
 import { SettingsContext } from './context/SettingsContext';
 
 // Initial Nodes for demo
@@ -38,11 +43,11 @@ const initialNodes: Node<StoryNodeData>[] = [
     id: '1',
     type: 'fusionNode',
     position: { x: 100, y: 100 },
-    data: { 
-      label: 'Main Concept', 
-      description: 'Central idea for the campaign', 
-      duration: 5, 
-      image: null, 
+    data: {
+      label: 'Main Concept',
+      description: 'Central idea for the campaign',
+      duration: 5,
+      image: null,
       fileName: null,
       color: NODE_COLORS.Orange,
       variant: 'idea',
@@ -53,11 +58,11 @@ const initialNodes: Node<StoryNodeData>[] = [
     id: '2',
     type: 'fusionNode',
     position: { x: 450, y: 100 },
-    data: { 
-      label: 'Scene 1: Intro', 
-      description: 'Wide shot of the city skyline at dawn.', 
-      duration: 4, 
-      image: null, 
+    data: {
+      label: 'Scene 1: Intro',
+      description: 'Wide shot of the city skyline at dawn.',
+      duration: 4,
+      image: null,
       fileName: null,
       color: NODE_COLORS.Blue,
       variant: 'scene',
@@ -72,34 +77,453 @@ const initialEdges: Edge[] = [
 ];
 
 // Define outside component to avoid recreation
-const nodeTypes: NodeTypes = { 
+const nodeTypes: NodeTypes = {
   fusionNode: FusionNode,
   groupNode: GroupNode
 };
 
+interface HistoryState {
+  nodes: Node<StoryNodeData>[];
+  edges: Edge[];
+}
+
+interface ProjectRecord {
+  id: string;
+  name: string;
+  nodes: Node<StoryNodeData>[];
+  edges: Edge[];
+  projectNotes: string;
+  assets: Asset[];
+  aspectRatio: AspectRatio;
+  viewMode: ViewMode;
+  lastOpenedAt: number;
+  updatedAt: number;
+  createdAt: number;
+  thumbnailUrl?: string | null;
+  isArchived: boolean;
+}
+
+const PROJECTS_STORAGE_KEY = 'flowframe-projects';
+
 const AppContent = () => {
-  const [nodes, setNodes] = useState<Node<StoryNodeData>[]>(initialNodes);
-  const [edges, setEdges] = useState<Edge[]>(initialEdges);
+  const loadProjects = useCallback((): ProjectRecord[] => {
+    if (typeof window === 'undefined') return [];
+    try {
+      const raw = localStorage.getItem(PROJECTS_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw) as ProjectRecord[];
+        return parsed.map(p => ({
+          ...p,
+          nodes: Array.isArray(p.nodes) ? p.nodes : [],
+          edges: Array.isArray(p.edges) ? p.edges : [],
+          projectNotes: p.projectNotes || '',
+          assets: Array.isArray(p.assets) ? p.assets : [],
+          aspectRatio: p.aspectRatio || '16:9',
+          viewMode: p.viewMode || 'storyboard',
+          createdAt: p.createdAt ?? Date.now(),
+          updatedAt: p.updatedAt ?? Date.now(),
+          lastOpenedAt: p.lastOpenedAt ?? Date.now(),
+          isArchived: p.isArchived ?? false,
+          thumbnailUrl: p.thumbnailUrl ?? null
+        }));
+      }
+    } catch (e) {
+      console.error('Failed to load projects from storage', e);
+    }
+    const demo: ProjectRecord = {
+      id: generateUUID(),
+      name: 'Demo Project',
+      nodes: initialNodes,
+      edges: initialEdges,
+      projectNotes: '',
+      assets: [],
+      aspectRatio: '16:9',
+      viewMode: 'storyboard',
+      lastOpenedAt: Date.now(),
+      updatedAt: Date.now(),
+      createdAt: Date.now(),
+      thumbnailUrl: initialNodes[1]?.data?.image || initialNodes[0]?.data?.image || null,
+      isArchived: false
+    };
+    return [demo];
+  }, []);
+
+  const [projects, setProjects] = useState<ProjectRecord[]>(loadProjects);
+  const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
+  const [showDashboard, setShowDashboard] = useState(true);
+
+  const activeProject = useMemo(() => projects.find(p => p.id === activeProjectId) || null, [projects, activeProjectId]);
+
+  const [nodes, setNodes] = useState<Node<StoryNodeData>[]>(activeProject?.nodes || []);
+  const [edges, setEdges] = useState<Edge[]>(activeProject?.edges || []);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [selectedNodes, setSelectedNodes] = useState<Node[]>([]);
-  const [projectName, setProjectName] = useState('MyStoryboard');
-  const [aspectRatio, setAspectRatio] = useState<AspectRatio>('16:9');
+  const [projectName, setProjectName] = useState(activeProject?.name || '');
+  const [aspectRatio, setAspectRatio] = useState<AspectRatio>(activeProject?.aspectRatio || '16:9');
   const [isPresentationOpen, setIsPresentationOpen] = useState(false);
-  
+
   // -- New Features State --
-  const [projectNotes, setProjectNotes] = useState('');
-  const [assets, setAssets] = useState<Asset[]>([]);
-  
+  const [projectNotes, setProjectNotes] = useState(activeProject?.projectNotes || '');
+  const [assets, setAssets] = useState<Asset[]>(activeProject?.assets || []);
+  const [viewMode, setViewMode] = useState<ViewMode>(activeProject?.viewMode || 'storyboard');
+
   // -- Context Menu State --
   const [menu, setMenu] = useState<{ id: string; top: number; left: number; type: 'node' | 'edge' } | null>(null);
 
   // -- Figma Style Controls State --
   const [isSpacePressed, setIsSpacePressed] = useState(false);
 
-  const { screenToFlowPosition } = useReactFlow();
+  // -- Undo/Redo State --
+  const [history, setHistory] = useState<HistoryState[]>([{ nodes: activeProject?.nodes || [], edges: activeProject?.edges || [] }]);
+  const [historyIndex, setHistoryIndex] = useState(0);
+  const [projectHistories, setProjectHistories] = useState<Record<string, { history: HistoryState[]; index: number }>>({});
+
+  // Ref to hold state before a drag operation starts
+  const dragStartRef = useRef<HistoryState | null>(null);
+
+  const { screenToFlowPosition, getNodes, getEdges: getEdgesFlow, getIntersectingNodes } = useReactFlow();
 
   // -- Settings Context Value --
   const settingsValue = useMemo(() => ({ aspectRatio }), [aspectRatio]);
+
+  // Persist projects whenever they change
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(projects));
+    }
+  }, [projects]);
+
+  const navigate = useCallback((path: string) => {
+    if (typeof window !== 'undefined') {
+      window.history.pushState({}, '', path);
+    }
+  }, []);
+
+  const updateActiveProject = useCallback((updates: Partial<ProjectRecord>, touchUpdated = true) => {
+    if (!activeProjectId) return;
+    setProjects(prev => prev.map(p => p.id === activeProjectId ? { ...p, ...updates, updatedAt: touchUpdated ? Date.now() : p.updatedAt } : p));
+  }, [activeProjectId]);
+
+  const openProject = useCallback((projectId: string, pushRoute: boolean = true) => {
+    const project = projects.find(p => p.id === projectId);
+    if (!project) return;
+
+    setActiveProjectId(projectId);
+    setShowDashboard(false);
+    setNodes(Array.isArray(project.nodes) ? project.nodes : []);
+    setEdges(Array.isArray(project.edges) ? project.edges : []);
+    setProjectName(project.name);
+    setAspectRatio(project.aspectRatio);
+    setProjectNotes(project.projectNotes);
+    setAssets(project.assets);
+    setViewMode(project.viewMode);
+    setSelectedNodeId(null);
+    setSelectedNodes([]);
+
+    const bundle = projectHistories[projectId] ?? { history: [{ nodes: project.nodes, edges: project.edges }], index: 0 };
+    setHistory(bundle.history);
+    setHistoryIndex(bundle.index);
+    setProjectHistories(prev => ({ ...prev, [projectId]: bundle }));
+
+    setProjects(prev => prev.map(p => p.id === projectId ? { ...p, lastOpenedAt: Date.now() } : p));
+    if (pushRoute) navigate(`/projects/${projectId}`);
+  }, [projects, projectHistories, navigate]);
+
+  const handleCreateProject = useCallback(() => {
+    const id = generateUUID();
+    const newProject: ProjectRecord = {
+      id,
+      name: 'Untitled Project',
+      nodes: [],
+      edges: [],
+      projectNotes: '',
+      assets: [],
+      aspectRatio: '16:9',
+      viewMode: 'storyboard',
+      lastOpenedAt: Date.now(),
+      updatedAt: Date.now(),
+      createdAt: Date.now(),
+      thumbnailUrl: null,
+      isArchived: false
+    };
+
+    const initialHistory = { history: [{ nodes: [], edges: [] }], index: 0 };
+    setProjects(prev => [newProject, ...prev]);
+    setProjectHistories(prev => ({ ...prev, [id]: initialHistory }));
+
+    setActiveProjectId(id);
+    setShowDashboard(false);
+    setNodes(newProject.nodes);
+    setEdges(newProject.edges);
+    setProjectName(newProject.name);
+    setAspectRatio(newProject.aspectRatio);
+    setProjectNotes('');
+    setAssets([]);
+    setViewMode('storyboard');
+    setHistory(initialHistory.history);
+    setHistoryIndex(initialHistory.index);
+    setSelectedNodeId(null);
+    setSelectedNodes([]);
+    navigate(`/projects/${id}`);
+  }, []);
+
+  const goToDashboard = useCallback(() => {
+    if (activeProjectId) {
+      const previewImage = nodes.find(n => (n.data as StoryNodeData)?.image)?.data.image || null;
+      updateActiveProject({ nodes, edges, projectNotes, assets, aspectRatio, viewMode, thumbnailUrl: previewImage });
+      setProjectHistories(prev => ({ ...prev, [activeProjectId]: { history, index: historyIndex } }));
+    }
+    setShowDashboard(true);
+    setActiveProjectId(null);
+    setSelectedNodeId(null);
+    setSelectedNodes([]);
+    setIsPresentationOpen(false);
+    setMenu(null);
+    navigate('/projects');
+  }, [activeProjectId, nodes, edges, projectNotes, assets, aspectRatio, viewMode, history, historyIndex, navigate, updateActiveProject]);
+
+  const handleRenameProject = useCallback((name: string) => {
+    setProjectName(name);
+    updateActiveProject({ name });
+  }, [updateActiveProject]);
+
+  const handleAspectRatioChange = useCallback((ratio: AspectRatio) => {
+    setAspectRatio(ratio);
+    updateActiveProject({ aspectRatio: ratio });
+  }, [updateActiveProject]);
+
+  const handleSetViewMode = useCallback((mode: ViewMode) => {
+    setViewMode(mode);
+    updateActiveProject({ viewMode: mode }, false);
+  }, [updateActiveProject]);
+
+  const handleSetProjectNotes = useCallback((notes: string) => {
+    setProjectNotes(notes);
+    updateActiveProject({ projectNotes: notes });
+  }, [updateActiveProject]);
+
+  const renameProject = useCallback((id: string, name: string) => {
+    setProjects(prev => prev.map(p => p.id === id ? { ...p, name, updatedAt: Date.now() } : p));
+    if (id === activeProjectId) {
+      setProjectName(name);
+    }
+  }, [activeProjectId]);
+
+  const duplicateProject = useCallback((id: string) => {
+    const source = projects.find(p => p.id === id);
+    if (!source) return;
+    const newId = generateUUID();
+    const now = Date.now();
+    const clone: ProjectRecord = {
+      ...source,
+      id: newId,
+      name: `${source.name} (Copy)`,
+      createdAt: now,
+      updatedAt: now,
+      lastOpenedAt: now,
+      isArchived: false
+    };
+    setProjects(prev => [clone, ...prev]);
+  }, [projects]);
+
+  const deleteProject = useCallback((id: string) => {
+    setProjects(prev => prev.filter(p => p.id !== id));
+    if (activeProjectId === id) {
+      goToDashboard();
+    }
+  }, [activeProjectId, goToDashboard]);
+
+  const archiveProject = useCallback((id: string) => {
+    setProjects(prev => prev.map(p => p.id === id ? { ...p, isArchived: true, updatedAt: Date.now() } : p));
+  }, []);
+
+  // Simple client-side routing for dashboard/editor views
+  useEffect(() => {
+    const applyRoute = () => {
+      if (typeof window === 'undefined') return;
+      const path = window.location.pathname;
+      if (path.startsWith('/projects/')) {
+        const id = path.replace('/projects/', '');
+
+        // Prevent infinite loop if project is already active
+        if (activeProjectId === id) return;
+
+        if (projects.find(p => p.id === id)) {
+          openProject(id, false);
+          return;
+        }
+      }
+      if (path !== '/projects') {
+        navigate('/projects');
+      }
+
+      // Only reset if needed to avoid unnecessary state updates
+      if (!showDashboard || activeProjectId) {
+        setShowDashboard(true);
+        setActiveProjectId(null);
+      }
+    };
+
+    applyRoute();
+    window.addEventListener('popstate', applyRoute);
+    return () => window.removeEventListener('popstate', applyRoute);
+  }, [projects, openProject, navigate, activeProjectId, showDashboard]);
+
+  const recordHistory = useCallback((newNodes: Node<StoryNodeData>[], newEdges: Edge[]) => {
+    setNodes(newNodes);
+    setEdges(newEdges);
+
+    setHistory(prev => {
+      const past = prev.slice(0, historyIndex + 1);
+      const updatedHistory = [...past, { nodes: newNodes, edges: newEdges }];
+      if (activeProjectId) {
+        setProjectHistories(ph => ({ ...ph, [activeProjectId]: { history: updatedHistory, index: historyIndex + 1 } }));
+        const previewImage = newNodes.find(n => (n.data as StoryNodeData)?.image)?.data.image || null;
+        updateActiveProject({ nodes: newNodes, edges: newEdges, thumbnailUrl: previewImage }, true);
+      }
+      return updatedHistory;
+    });
+    setHistoryIndex(prev => prev + 1);
+  }, [historyIndex, activeProjectId, updateActiveProject]);
+
+  const undo = useCallback(() => {
+    if (historyIndex > 0) {
+      const newIndex = historyIndex - 1;
+      const state = history[newIndex];
+      setNodes(state.nodes);
+      setEdges(state.edges);
+      setHistoryIndex(newIndex);
+      if (activeProjectId) {
+        setProjectHistories(ph => ({ ...ph, [activeProjectId]: { history, index: newIndex } }));
+        updateActiveProject({ nodes: state.nodes, edges: state.edges }, false);
+      }
+    }
+  }, [history, historyIndex, activeProjectId, updateActiveProject]);
+
+  const redo = useCallback(() => {
+    if (historyIndex < history.length - 1) {
+      const newIndex = historyIndex + 1;
+      const state = history[newIndex];
+      setNodes(state.nodes);
+      setEdges(state.edges);
+      setHistoryIndex(newIndex);
+      if (activeProjectId) {
+        setProjectHistories(ph => ({ ...ph, [activeProjectId]: { history, index: newIndex } }));
+        updateActiveProject({ nodes: state.nodes, edges: state.edges }, false);
+      }
+    }
+  }, [history, historyIndex, activeProjectId, updateActiveProject]);
+
+  // Keyboard Shortcuts for Undo/Redo
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
+        if (e.shiftKey) {
+          redo();
+        } else {
+          undo();
+        }
+        e.preventDefault();
+      } else if ((e.ctrlKey || e.metaKey) && e.key === 'y') {
+        redo();
+        e.preventDefault();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [undo, redo]);
+
+  // -- Asset Helper --
+  const handleAddAsset = useCallback((asset: Asset) => {
+    setAssets(prev => {
+      const next = [asset, ...prev];
+      updateActiveProject({ assets: next });
+      return next;
+    });
+  }, [updateActiveProject]);
+
+  // -- Helper to Create Link Node --
+  const createLinkNode = useCallback(async (url: string, position: { x: number, y: number }) => {
+    const id = generateUUID();
+    // Placeholder node
+    const newNode: Node<StoryNodeData> = {
+      id,
+      type: 'fusionNode',
+      position,
+      data: {
+        label: 'Loading Link...',
+        description: 'Fetching metadata...',
+        duration: 0,
+        image: null,
+        fileName: null,
+        color: NODE_COLORS.Gray,
+        variant: 'link',
+        linkUrl: url,
+        linkDomain: getDomain(url)
+      }
+    };
+
+    const nextNodes = [...nodes, newNode];
+    recordHistory(nextNodes, edges);
+
+    const metadata = await fetchLinkMetadata(url);
+
+    setNodes(nds => nds.map(n => {
+      if (n.id === id) {
+        return {
+          ...n,
+          data: {
+            ...n.data,
+            label: metadata.title || 'External Link',
+            linkTitle: metadata.title,
+            linkDescription: metadata.description,
+            linkImage: metadata.image,
+            description: metadata.description || '' // fallback
+          }
+        };
+      }
+      return n;
+    }));
+
+    // Add to Assets Library
+    const linkAsset: Asset = {
+      id: generateUUID(),
+      type: 'link',
+      url: url,
+      name: metadata.title || url,
+      tags: ['link'],
+      dateAdded: Date.now(),
+      meta: {
+        title: metadata.title,
+        description: metadata.description,
+        image: metadata.image
+      }
+    };
+    handleAddAsset(linkAsset);
+
+  }, [nodes, edges, recordHistory, handleAddAsset]);
+
+  // -- Global Paste Listener for URLs --
+  useEffect(() => {
+    const handlePaste = (e: ClipboardEvent) => {
+      // If presentation is open or focusing an input, ignore
+      if (isPresentationOpen) return;
+      const target = e.target as HTMLElement;
+      if (target.matches('input, textarea, [contenteditable]')) return;
+
+      const text = e.clipboardData?.getData('text');
+      if (text && isValidURL(text.trim())) {
+        e.preventDefault();
+        const lastNode = nodes[nodes.length - 1];
+        const pos = lastNode ? { x: lastNode.position.x + 50, y: lastNode.position.y + 50 } : { x: 200, y: 200 };
+        createLinkNode(text.trim(), pos);
+      }
+    };
+
+    window.addEventListener('paste', handlePaste);
+    return () => window.removeEventListener('paste', handlePaste);
+  }, [isPresentationOpen, nodes, createLinkNode]);
+
 
   // -- Keyboard Event Listeners for Spacebar --
   useEffect(() => {
@@ -111,7 +535,7 @@ const AppContent = () => {
         // Check if we are focused on an input element
         const target = e.target as HTMLElement;
         const isInput = target.matches('input, textarea, [contenteditable]');
-        
+
         if (!isInput) {
           e.preventDefault(); // Prevent page scrolling
           setIsSpacePressed(true);
@@ -147,20 +571,66 @@ const AppContent = () => {
   const onConnect = useCallback(
     (params: Connection) => {
       if (params.source === params.target) return;
-      setEdges((eds) => addEdge({ ...params, type: 'default', style: { stroke: '#888', strokeWidth: 2 } }, eds));
+      // Record history for connection
+      const newEdges = addEdge({ ...params, type: 'default', style: { stroke: '#888', strokeWidth: 2 } }, edges);
+      recordHistory(nodes, newEdges);
     },
-    []
+    [nodes, edges, recordHistory]
   );
 
-  // FIX: Selection logic to handle drag-selection (multi-select)
   const onSelectionChange = useCallback(({ nodes: selectedNodesList }: OnSelectionChangeParams) => {
-    setSelectedNodes(selectedNodesList);
-    // If nodes are selected, pick the last one (or primary one) for the inspector
-    if (selectedNodesList.length > 0) {
-      setSelectedNodeId(selectedNodesList[selectedNodesList.length - 1].id);
+    // PARENT DOMINANCE LOGIC:
+    // If a parent node (Group) is selected, force deselect its children.
+    // This prevents "double movement" where dragging the group moves children twice (once via parent, once via own selection)
+    // and visually fixes the "Select All" appearance when selecting a group.
+
+    const selectedIds = new Set(selectedNodesList.map(n => n.id));
+    const childrenToDeselect = selectedNodesList.filter(n => n.parentId && selectedIds.has(n.parentId));
+
+    if (childrenToDeselect.length > 0) {
+      // Enforce deselection by updating state
+      setNodes(nds => nds.map(n => {
+        if (childrenToDeselect.some(child => child.id === n.id)) {
+          return { ...n, selected: false };
+        }
+        return n;
+      }));
+
+      // Update local selection state optimistically
+      const validSelection = selectedNodesList.filter(n => !n.parentId || !selectedIds.has(n.parentId));
+      setSelectedNodes(validSelection);
+
+      if (validSelection.length > 0) {
+        setSelectedNodeId(validSelection[validSelection.length - 1].id);
+      } else {
+        setSelectedNodeId(null);
+      }
     } else {
-      setSelectedNodeId(null);
+      setSelectedNodes(selectedNodesList);
+      if (selectedNodesList.length > 0) {
+        setSelectedNodeId(selectedNodesList[selectedNodesList.length - 1].id);
+      } else {
+        setSelectedNodeId(null);
+      }
     }
+  }, []);
+
+  const handleSelectNode = useCallback((id: string | null, multi: boolean = false) => {
+    if (id === null) {
+      setSelectedNodeId(null);
+      setSelectedNodes([]);
+      setNodes(nds => nds.map(n => ({ ...n, selected: false })));
+      return;
+    }
+
+    // If multi-select is enabled (e.g. Shift+Click in timeline), we add/toggle instead of replace
+    setNodes(nds => nds.map(n => {
+      if (n.id === id) return { ...n, selected: true };
+      if (multi) return n; // Keep existing selection
+      return { ...n, selected: false }; // Clear others
+    }));
+
+    // We rely on onSelectionChange to update selectedNodes and selectedNodeId state
   }, []);
 
   const onPaneClick = useCallback(() => {
@@ -169,9 +639,7 @@ const AppContent = () => {
 
   const onNodeContextMenu = useCallback(
     (event: React.MouseEvent, node: Node) => {
-      event.preventDefault(); // Prevent native browser context menu
-      
-      // Calculate position relative to the viewport
+      event.preventDefault();
       setMenu({
         id: node.id,
         top: event.clientY,
@@ -195,26 +663,97 @@ const AppContent = () => {
     []
   );
 
+  // --- DRAG HISTORY LOGIC ---
+  const onNodeDragStart = useCallback(() => {
+    dragStartRef.current = { nodes, edges };
+  }, [nodes, edges]);
+
+  // --- DRAG TO GROUP LOGIC ---
+  const onNodeDragStop = useCallback((event: React.MouseEvent, node: Node) => {
+    // Only handle if single node drag (for simplicity)
+    if (node.type === 'groupNode') {
+      recordHistory(nodes, edges);
+      return;
+    }
+
+    // Determine new state based on dropping logic
+    let nextNodes = [...nodes];
+    let changed = false;
+
+    // Find intersecting group
+    const intersections = getIntersectingNodes(node).filter(n => n.type === 'groupNode');
+    const groupNode = intersections[intersections.length - 1]; // Top-most group
+
+    // Case 1: Dragged INTO a group
+    if (groupNode && node.parentId !== groupNode.id) {
+      nextNodes = nextNodes.map(n => {
+        if (n.id === node.id) {
+          const relX = node.position.x - groupNode.position.x;
+          const relY = node.position.y - groupNode.position.y;
+          changed = true;
+          return {
+            ...n,
+            parentId: groupNode.id,
+            extent: 'parent',
+            position: { x: relX, y: relY }
+          };
+        }
+        return n;
+      });
+    }
+
+    // Case 2: Dragged OUT of a group (no intersection with parent)
+    if (!groupNode && node.parentId) {
+      const parent = nodes.find(n => n.id === node.parentId);
+      if (parent) {
+        nextNodes = nextNodes.map(n => {
+          if (n.id === node.id) {
+            const absX = parent.position.x + node.position.x;
+            const absY = parent.position.y + node.position.y;
+            changed = true;
+            return {
+              ...n,
+              parentId: undefined,
+              extent: undefined,
+              position: { x: absX, y: absY }
+            };
+          }
+          return n;
+        });
+      }
+    }
+
+    // Even if not grouped/ungrouped, position changed. Record history.
+    recordHistory(nextNodes, edges);
+
+  }, [nodes, edges, getIntersectingNodes, recordHistory]);
+
+
+  // --- AUTO LAYOUT LOGIC ---
+  const handleAutoLayout = useCallback(() => {
+    const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(nodes, edges);
+    recordHistory(layoutedNodes, layoutedEdges);
+  }, [nodes, edges, recordHistory]);
+
+
   // --- GROUPING LOGIC ---
   const handleGroupNodes = useCallback(() => {
     setMenu(null);
     if (selectedNodes.length < 2) return;
 
-    // 1. Calculate Bounding Box of selected nodes
     let minX = Infinity;
     let minY = Infinity;
     let maxX = -Infinity;
     let maxY = -Infinity;
 
     selectedNodes.forEach(n => {
-       // Estimate width/height if not measured yet (fallback)
-       const w = n.measured?.width || 250; 
-       const h = n.measured?.height || 250;
-       
-       if (n.position.x < minX) minX = n.position.x;
-       if (n.position.y < minY) minY = n.position.y;
-       if (n.position.x + w > maxX) maxX = n.position.x + w;
-       if (n.position.y + h > maxY) maxY = n.position.y + h;
+      const w = n.measured?.width || 250;
+      const h = n.measured?.height || 250;
+
+      if (n.position.x < minX) minX = n.position.x;
+      if (n.position.y < minY) minY = n.position.y;
+      if (n.position.x + w > maxX) maxX = n.position.x + w;
+      if (n.position.y + h > maxY) maxY = n.position.y + h;
     });
 
     const padding = 40;
@@ -223,7 +762,6 @@ const AppContent = () => {
     const groupWidth = (maxX - minX) + (padding * 2);
     const groupHeight = (maxY - minY) + (padding * 2);
 
-    // 2. Create Group Node
     const groupId = generateUUID();
     const groupNode: Node<StoryNodeData> = {
       id: groupId,
@@ -242,61 +780,63 @@ const AppContent = () => {
       selected: true
     };
 
-    // 3. Update Selected Nodes: Set Parent and Adjust Position to Relative
     const updatedSelectedNodes = selectedNodes.map(node => {
-        // The child position is relative to the parent (0,0 is top-left of parent)
-        const relativeX = node.position.x - groupX;
-        const relativeY = node.position.y - groupY;
+      const relativeX = node.position.x - groupX;
+      const relativeY = node.position.y - groupY;
 
-        return {
-            ...node,
-            parentId: groupId,
-            extent: 'parent', // Constrain to parent bounds? Optional. 'parent' forces it inside.
-            position: { x: relativeX, y: relativeY },
-            selected: false // Deselect children so we see the group selected
-        };
+      return {
+        ...node,
+        parentId: groupId,
+        extent: 'parent',
+        position: { x: relativeX, y: relativeY },
+        selected: false
+      };
     });
 
-    // 4. Update Node State
-    // Remove the old versions of selected nodes, add the group, add the new versions of selected nodes
-    setNodes(nds => {
-        const remainingNodes = nds.filter(n => !selectedNodes.find(sn => sn.id === n.id));
-        return [...remainingNodes, groupNode, ...updatedSelectedNodes];
-    });
+    const remainingNodes = nodes.filter(n => !selectedNodes.find(sn => sn.id === n.id));
+    const nextNodes = [...remainingNodes, groupNode, ...updatedSelectedNodes];
 
-  }, [selectedNodes]);
+    recordHistory(nextNodes, edges);
+
+  }, [selectedNodes, nodes, edges, recordHistory]);
 
   const handleUngroupNodes = useCallback(() => {
     setMenu(null);
-    // Find the currently selected group node
-    if (!menu) return;
-    const groupNode = nodes.find(n => n.id === menu.id);
-    
+
+    // Support ungrouping if menu is active OR if selection contains a group
+    let groupNodeId: string | undefined;
+
+    if (menu && menu.type === 'node') {
+      groupNodeId = menu.id;
+    } else if (selectedNodes.length === 1 && selectedNodes[0].type === 'groupNode') {
+      groupNodeId = selectedNodes[0].id;
+    }
+
+    if (!groupNodeId) return;
+
+    const groupNode = nodes.find(n => n.id === groupNodeId);
     if (!groupNode || groupNode.type !== 'groupNode') return;
 
-    // Find children
     const children = nodes.filter(n => n.parentId === groupNode.id);
 
-    // Update children to have absolute positions again
     const updatedChildren = children.map(child => {
-        return {
-            ...child,
-            parentId: undefined,
-            extent: undefined,
-            position: {
-                x: groupNode.position.x + child.position.x,
-                y: groupNode.position.y + child.position.y
-            }
-        };
+      return {
+        ...child,
+        parentId: undefined,
+        extent: undefined,
+        position: {
+          x: groupNode.position.x + child.position.x,
+          y: groupNode.position.y + child.position.y
+        }
+      };
     });
 
-    // Remove group node, update children
-    setNodes(nds => {
-        const others = nds.filter(n => n.id !== groupNode.id && n.parentId !== groupNode.id);
-        return [...others, ...updatedChildren];
-    });
+    const others = nodes.filter(n => n.id !== groupNode.id && n.parentId !== groupNode.id);
+    const nextNodes = [...others, ...updatedChildren];
 
-  }, [menu, nodes]);
+    recordHistory(nextNodes, edges);
+
+  }, [menu, nodes, edges, selectedNodes, recordHistory]);
 
   // --- CONTEXT MENU ACTIONS ---
   const handleDuplicateNode = useCallback(() => {
@@ -315,38 +855,37 @@ const AppContent = () => {
         ...nodeToDuplicate.data,
         label: `${nodeToDuplicate.data.label} (Copy)`
       },
-      selected: true, // Select the new node
+      selected: true,
     };
 
-    // Deselect original
-    setNodes((nds) => 
-      nds.map(n => ({...n, selected: false})).concat(newNode)
-    );
+    const nextNodes = nodes.map(n => ({ ...n, selected: false })).concat(newNode);
+    recordHistory(nextNodes, edges);
     setMenu(null);
-  }, [menu, nodes]);
+  }, [menu, nodes, edges, recordHistory]);
 
   const handleDelete = useCallback(() => {
     if (!menu) return;
-    
-    if (menu.type === 'node') {
-        const node = nodes.find(n => n.id === menu.id);
-        
-        let idsToDelete = [menu.id];
-        if (node?.type === 'groupNode') {
-           const children = nodes.filter(n => n.parentId === menu.id);
-           idsToDelete = [...idsToDelete, ...children.map(c => c.id)];
-        }
 
-        setNodes((nds) => nds.filter((n) => !idsToDelete.includes(n.id)));
-        setEdges((eds) => eds.filter((e) => !idsToDelete.includes(e.source) && !idsToDelete.includes(e.target)));
-        setSelectedNodeId(null);
+    if (menu.type === 'node') {
+      const node = nodes.find(n => n.id === menu.id);
+
+      let idsToDelete = [menu.id];
+      if (node?.type === 'groupNode') {
+        const children = nodes.filter(n => n.parentId === menu.id);
+        idsToDelete = [...idsToDelete, ...children.map(c => c.id)];
+      }
+
+      const nextNodes = nodes.filter((n) => !idsToDelete.includes(n.id));
+      const nextEdges = edges.filter((e) => !idsToDelete.includes(e.source) && !idsToDelete.includes(e.target));
+      recordHistory(nextNodes, nextEdges);
+      setSelectedNodeId(null);
     } else {
-        // Delete Edge
-        setEdges((eds) => eds.filter((e) => e.id !== menu.id));
+      const nextEdges = edges.filter((e) => e.id !== menu.id);
+      recordHistory(nodes, nextEdges);
     }
-    
+
     setMenu(null);
-  }, [menu, nodes]);
+  }, [menu, nodes, edges, recordHistory]);
 
   const handleAddNode = useCallback(() => {
     const id = generateUUID();
@@ -366,25 +905,40 @@ const AppContent = () => {
         mediaType: 'image'
       }
     };
-    setNodes((nds) => [...nds, newNode]);
-  }, [nodes]);
+    const nextNodes = [...nodes, newNode];
+    recordHistory(nextNodes, edges);
+  }, [nodes, edges, recordHistory]);
 
-  const handleUpdateNode = useCallback((id: string, newData: Partial<StoryNodeData>) => {
-    setNodes((nds) =>
-      nds.map((node) => {
-        if (node.id === id) {
-          return { ...node, data: { ...node.data, ...newData } };
-        }
-        return node;
-      })
-    );
-  }, []);
+  const handleUpdateDuration = useCallback((id: string, duration: number) => {
+    // Discrete action from Timeline
+    const nextNodes = nodes.map(n => n.id === id ? { ...n, data: { ...n.data, duration } } : n);
+    recordHistory(nextNodes, edges);
+  }, [nodes, edges, recordHistory]);
+
+  const handleUpdateNodeHistory = useCallback((id: string, newData: Partial<StoryNodeData>) => {
+    const nextNodes = nodes.map((node) => {
+      if (node.id === id) {
+        return { ...node, data: { ...node.data, ...newData } };
+      }
+      return node;
+    });
+    recordHistory(nextNodes, edges);
+  }, [nodes, edges, recordHistory]);
+
+  const handleApplyColor = useCallback((color: string) => {
+    if (selectedNodes.length === 0) return;
+    const nextNodes = nodes.map(n => {
+      if (n.selected) {
+        return { ...n, data: { ...n.data, color } };
+      }
+      return n;
+    });
+    recordHistory(nextNodes, edges);
+  }, [selectedNodes, nodes, edges, recordHistory]);
 
   // -- Asset Management Handlers --
   const handleAddAssets = useCallback((files: FileList) => {
     const fileList = Array.from(files);
-    
-    // Use Promise.all to handle multiple file reads cleanly and update state once
     const filePromises = fileList.map(file => {
       return new Promise<Asset | null>(resolve => {
         let type: MediaType = 'image';
@@ -418,34 +972,34 @@ const AppContent = () => {
     Promise.all(filePromises).then(results => {
       const validAssets = results.filter((a): a is Asset => a !== null);
       if (validAssets.length > 0) {
-        setAssets(prev => [...validAssets, ...prev]);
+        setAssets(prev => {
+          const next = [...validAssets, ...prev];
+          updateActiveProject({ assets: next });
+          return next;
+        });
       }
     });
-  }, []);
+  }, [updateActiveProject]);
 
   const handleUpdateAsset = useCallback((id: string, updates: Partial<Asset>) => {
-    setAssets(prev => prev.map(a => a.id === id ? { ...a, ...updates } : a));
-  }, []);
+    setAssets(prev => {
+      const next = prev.map(a => a.id === id ? { ...a, ...updates } : a);
+      updateActiveProject({ assets: next });
+      return next;
+    });
+  }, [updateActiveProject]);
 
   const handleDeleteAsset = useCallback((id: string) => {
-    setAssets(prev => prev.filter(a => a.id !== id));
-  }, []);
+    setAssets(prev => {
+      const next = prev.filter(a => a.id !== id);
+      updateActiveProject({ assets: next });
+      return next;
+    });
+  }, [updateActiveProject]);
 
-  const handleApplyColor = useCallback((color: string) => {
-    // Apply to all selected nodes
-    if(selectedNodes.length === 0) return;
-    
-    setNodes((nds) => nds.map(n => {
-        if (n.selected) {
-             return { ...n, data: { ...n.data, color } };
-        }
-        return n;
-    }));
-  }, [selectedNodes]);
-
-  const selectedNode = useMemo(() => 
-    nodes.find((n) => n.id === selectedNodeId) || null, 
-  [nodes, selectedNodeId]);
+  const selectedNode = useMemo(() =>
+    nodes.find((n) => n.id === selectedNodeId) || null,
+    [nodes, selectedNodeId]);
 
   // -- Canvas Drag & Drop Logic --
   const onDragOver = useCallback((event: React.DragEvent) => {
@@ -457,42 +1011,77 @@ const AppContent = () => {
     (event: React.DragEvent) => {
       event.preventDefault();
 
-      // 1. Handle Internal Asset Drop (from Library)
       const type = event.dataTransfer.getData('application/reactflow/type');
       const assetMediaType = event.dataTransfer.getData('application/reactflow/mediaType') as MediaType;
       const assetSource = event.dataTransfer.getData('application/reactflow/source');
-      
+
       if (type === 'asset' && assetSource) {
-         const position = screenToFlowPosition({ x: event.clientX, y: event.clientY });
-         
-         const newNode: Node<StoryNodeData> = {
+        const position = screenToFlowPosition({ x: event.clientX, y: event.clientY });
+
+        if (assetMediaType === 'link') {
+          const metaStr = event.dataTransfer.getData('application/reactflow/linkMeta');
+          const meta = metaStr ? JSON.parse(metaStr) : {};
+
+          const newNode: Node<StoryNodeData> = {
             id: generateUUID(),
             type: 'fusionNode',
             position,
             data: {
-                label: 'New Asset',
-                description: '',
-                duration: 3,
-                image: assetSource,
-                fileName: 'asset',
-                color: NODE_COLORS.Blue,
-                variant: 'scene',
-                shotType: 'med',
-                mediaType: assetMediaType || 'image'
-            },
-         };
-         setNodes((nds) => nds.concat(newNode));
-         setSelectedNodeId(newNode.id);
-         return;
+              label: meta.title || assetSource,
+              description: meta.description || '',
+              duration: 0,
+              image: null,
+              fileName: null,
+              color: NODE_COLORS.Gray,
+              variant: 'link',
+              linkUrl: assetSource,
+              linkTitle: meta.title,
+              linkDescription: meta.description,
+              linkImage: meta.image,
+              linkDomain: getDomain(assetSource)
+            }
+          };
+          const nextNodes = [...nodes, newNode];
+          recordHistory(nextNodes, edges);
+          setSelectedNodeId(newNode.id);
+          return;
+        }
+
+        const newNode: Node<StoryNodeData> = {
+          id: generateUUID(),
+          type: 'fusionNode',
+          position,
+          data: {
+            label: 'New Asset',
+            description: '',
+            duration: 3,
+            image: assetSource,
+            fileName: 'asset',
+            color: NODE_COLORS.Blue,
+            variant: 'scene',
+            shotType: 'med',
+            mediaType: assetMediaType || 'image'
+          },
+        };
+        const nextNodes = [...nodes, newNode];
+        recordHistory(nextNodes, edges);
+        setSelectedNodeId(newNode.id);
+        return;
       }
 
-      // 2. Handle External File Drop (from Desktop)
+      const textData = event.dataTransfer.getData('text/plain');
+      if (textData && isValidURL(textData)) {
+        const position = screenToFlowPosition({ x: event.clientX, y: event.clientY });
+        createLinkNode(textData, position);
+        return;
+      }
+
       const file = event.dataTransfer.files[0];
       if (file) {
         let mediaType: MediaType = 'image';
         if (file.type.startsWith('video/')) mediaType = 'video';
         else if (file.type.startsWith('audio/')) mediaType = 'audio';
-        else if (!file.type.startsWith('image/')) return; // Unsupported type
+        else if (!file.type.startsWith('image/')) return;
 
         const reader = new FileReader();
         reader.onload = (e) => {
@@ -500,7 +1089,7 @@ const AppContent = () => {
             x: event.clientX,
             y: event.clientY,
           });
-          
+
           const resultUrl = e.target?.result as string;
 
           const newNode: Node<StoryNodeData> = {
@@ -514,16 +1103,16 @@ const AppContent = () => {
               image: resultUrl,
               fileName: file.name,
               color: NODE_COLORS.Blue,
-              variant: 'scene', // Audio might want different variant later, but FusionNode handles display
+              variant: 'scene',
               shotType: 'med',
               mediaType: mediaType
             },
           };
 
-          setNodes((nds) => nds.concat(newNode));
+          const nextNodes = [...nodes, newNode];
+          recordHistory(nextNodes, edges);
           setSelectedNodeId(newNode.id);
 
-          // NEW: Also add the file to the Asset Library automatically
           const newAsset: Asset = {
             id: generateUUID(),
             type: mediaType,
@@ -537,139 +1126,188 @@ const AppContent = () => {
         reader.readAsDataURL(file);
       }
     },
-    [screenToFlowPosition]
+    [screenToFlowPosition, createLinkNode, nodes, edges, recordHistory]
   );
 
-  // Determine context menu capabilities
   const canGroup = selectedNodes.length > 1;
   const canUngroup = useMemo(() => {
-      if (!menu) return false;
-      const node = nodes.find(n => n.id === menu.id);
-      return node?.type === 'groupNode';
-  }, [menu, nodes]);
+    if (menu && nodes.find(n => n.id === menu.id)?.type === 'groupNode') return true;
+    if (selectedNodes.length === 1 && selectedNodes[0].type === 'groupNode') return true;
+    return false;
+  }, [menu, nodes, selectedNodes]);
 
-  // Sort nodes for presentation (Timeline order, filtering out ideas/moods)
   const presentationNodes = useMemo(() => {
-    if (!isPresentationOpen) return [];
     return sortNodesByTimeline(getExportableNodes(nodes));
-  }, [nodes, isPresentationOpen]);
+  }, [nodes]);
+
+  if (showDashboard) {
+    return (
+      <SettingsContext.Provider value={settingsValue}>
+        <Dashboard
+          projects={projects}
+          onOpenProject={openProject}
+          onCreateProject={handleCreateProject}
+          onRenameProject={renameProject}
+          onDuplicateProject={duplicateProject}
+          onDeleteProject={deleteProject}
+          onArchiveProject={archiveProject}
+        />
+      </SettingsContext.Provider>
+    );
+  }
+
+  // Safety: if there's no active project, return to dashboard
+  if (!activeProjectId || !activeProject) {
+    return (
+      <SettingsContext.Provider value={settingsValue}>
+        <Dashboard
+          projects={projects}
+          onOpenProject={openProject}
+          onCreateProject={handleCreateProject}
+          onRenameProject={renameProject}
+          onDuplicateProject={duplicateProject}
+          onDeleteProject={deleteProject}
+          onArchiveProject={archiveProject}
+        />
+      </SettingsContext.Provider>
+    );
+  }
 
   return (
     <SettingsContext.Provider value={settingsValue}>
       <div className="flex flex-col h-screen w-screen bg-davinci-bg text-davinci-text font-sans">
-        <TopBar 
-          nodes={nodes} 
-          onAddNode={handleAddNode} 
+        <TopBar
+          nodes={nodes}
+          onAddNode={handleAddNode}
           projectName={projectName}
-          setProjectName={setProjectName}
+          setProjectName={handleRenameProject}
           aspectRatio={aspectRatio}
-          setAspectRatio={setAspectRatio}
+          setAspectRatio={handleAspectRatioChange}
           onPlay={() => setIsPresentationOpen(true)}
+          viewMode={viewMode}
+          setViewMode={handleSetViewMode}
+          onLayout={handleAutoLayout}
+          onGroup={handleGroupNodes}
+          onUngroup={handleUngroupNodes}
+          canGroup={canGroup}
+          canUngroup={canUngroup}
+          onUndo={undo}
+          onRedo={redo}
+          canUndo={historyIndex > 0}
+          canRedo={historyIndex < history.length - 1}
+          onBackToDashboard={goToDashboard}
+          showBackToDashboard
         />
-        
+
         <div className="flex flex-1 overflow-hidden">
-          {/* Left: Library Panel */}
-          <LibraryPanel 
+          <LibraryPanel
             nodes={nodes}
             projectNotes={projectNotes}
-            setProjectNotes={setProjectNotes}
+            setProjectNotes={handleSetProjectNotes}
             onApplyColor={handleApplyColor}
             assets={assets}
             onAddAssets={handleAddAssets}
+            onAddAsset={handleAddAsset}
             onUpdateAsset={handleUpdateAsset}
             onDeleteAsset={handleDeleteAsset}
           />
 
-          {/* Center: Main Canvas */}
-          <div 
-            className="flex-1 relative border-r border-black" 
-            onDragOver={onDragOver} 
-            onDrop={onDrop}
-            style={{ cursor: isSpacePressed ? 'grab' : 'default' }}
-          >
-            <ReactFlow
-              nodes={nodes}
-              edges={edges}
-              onNodesChange={onNodesChange}
-              onEdgesChange={onEdgesChange}
-              onConnect={onConnect}
-              
-              // REPLACED onNodeClick with onSelectionChange for better reliability
-              onSelectionChange={onSelectionChange}
-              
-              onPaneClick={onPaneClick}
-              onNodeContextMenu={onNodeContextMenu} // Enable right click for nodes
-              onEdgeContextMenu={onEdgeContextMenu} // Enable right click for edges
-              nodeTypes={nodeTypes}
-              
-              defaultEdgeOptions={{ 
-                type: 'default', 
-                style: { stroke: '#888', strokeWidth: 2 } 
-              }}
-              
-              fitView
-              snapToGrid={true}
-              snapGrid={[15, 15]}
-              
-              panOnDrag={isSpacePressed}
-              selectionOnDrag={!isSpacePressed}
-              selectionMode={SelectionMode.Partial}
-              panOnScroll={true}
-              zoomOnScroll={true}
-              zoomOnPinch={true}
-              deleteKeyCode={['Backspace', 'Delete']}
+          <div className="flex-1 flex flex-col border-r border-black overflow-hidden relative">
+            <div
+              className="flex-1 relative"
+              onDragOver={onDragOver}
+              onDrop={onDrop}
+              style={{ cursor: isSpacePressed ? 'grab' : 'default' }}
             >
-              <Background 
-                color="#2a2a2a" 
-                variant={BackgroundVariant.Dots} 
-                gap={20} 
-                size={1} 
-              />
-              <Controls className="!bg-[#262626] !border-[#3d3d3d] [&>button]:!fill-gray-400 [&>button]:!border-b-[#3d3d3d] hover:[&>button]:!bg-[#3d3d3d] hover:[&>button]:!fill-white" />
-              <MiniMap 
-                nodeColor={(n) => n.data.color || '#3d3d3d'} 
-                maskColor="#181818" 
-                className="!bg-[#262626] !border-[#3d3d3d]"
-              />
-            </ReactFlow>
-            
-            {menu && (
-              <ContextMenu 
-                x={menu.left} 
-                y={menu.top} 
-                type={menu.type}
-                onDuplicate={handleDuplicateNode} 
-                onDelete={handleDelete} 
-                onGroup={handleGroupNodes}
-                onUngroup={handleUngroupNodes}
-                canGroup={canGroup}
-                canUngroup={canUngroup}
-                onClose={() => setMenu(null)}
+              <ErrorBoundary>
+                <ReactFlow
+                  nodes={nodes}
+                  edges={edges}
+                  onNodesChange={onNodesChange}
+                  onEdgesChange={onEdgesChange}
+                  onConnect={onConnect}
+                  onSelectionChange={onSelectionChange}
+                  onPaneClick={onPaneClick}
+                  onNodeContextMenu={onNodeContextMenu}
+                  onEdgeContextMenu={onEdgeContextMenu}
+                  onNodeDragStart={onNodeDragStart}
+                  onNodeDragStop={onNodeDragStop}
+                  nodeTypes={nodeTypes}
+                  defaultEdgeOptions={{
+                    type: 'default',
+                    style: { stroke: '#888', strokeWidth: 2 }
+                  }}
+                  fitView
+                  snapToGrid={true}
+                  snapGrid={[15, 15]}
+                  panOnDrag={isSpacePressed}
+                  selectionOnDrag={false} // prevent accidental marquee that selects extra nodes
+                  selectionMode={SelectionMode.Partial}
+                  panOnScroll={true}
+                  zoomOnScroll={true}
+                  zoomOnPinch={true}
+                  deleteKeyCode={['Backspace', 'Delete']}
+                >
+                  <Background
+                    color="#2a2a2a"
+                    variant={BackgroundVariant.Dots}
+                    gap={20}
+                    size={1}
+                  />
+                  <Controls className="!bg-[#262626] !border-[#3d3d3d] [&>button]:!fill-gray-400 [&>button]:!border-b-[#3d3d3d] hover:[&>button]:!bg-[#3d3d3d] hover:[&>button]:!fill-white" />
+                  <MiniMap
+                    nodeColor={(n) => n.data.color || '#3d3d3d'}
+                    maskColor="#181818"
+                    className="!bg-[#262626] !border-[#3d3d3d]"
+                  />
+                </ReactFlow>
+              </ErrorBoundary>
+
+              {menu && (
+                <ContextMenu
+                  x={menu.left}
+                  y={menu.top}
+                  type={menu.type}
+                  onDuplicate={handleDuplicateNode}
+                  onDelete={handleDelete}
+                  onGroup={handleGroupNodes}
+                  onUngroup={handleUngroupNodes}
+                  canGroup={canGroup}
+                  canUngroup={canUngroup}
+                  onClose={() => setMenu(null)}
+                />
+              )}
+
+              <div className="absolute top-4 left-4 bg-[#262626]/80 p-2 rounded text-xs text-gray-400 pointer-events-none border border-[#3d3d3d] z-50">
+                <p>Pre-Production Fusion v1.9</p>
+                <p className="text-[10px] mt-1 text-davinci-accent opacity-70">
+                  {isSpacePressed ? '[HAND TOOL ACTIVE]' : 'Paste URL • Drag into Groups • Ctrl+Z Undo'}
+                </p>
+              </div>
+            </div>
+
+            {viewMode === 'storyboard' && (
+              <TimelinePanel
+                nodes={nodes}
+                selectedNodeIds={selectedNodes.map(n => n.id)}
+                onSelectNode={handleSelectNode}
+                onUpdateDuration={handleUpdateDuration}
               />
             )}
-            
-            <div className="absolute bottom-4 left-4 bg-[#262626]/80 p-2 rounded text-xs text-gray-400 pointer-events-none border border-[#3d3d3d] z-50">
-               <p>Pre-Production Fusion v1.7</p>
-               <p>Format: {aspectRatio} • Nodes: {nodes.length}</p>
-               <p className="text-[10px] mt-1 text-davinci-accent opacity-70">
-                  {isSpacePressed ? '[HAND TOOL ACTIVE]' : 'Hold Space to Pan • Right Click for Menu'}
-               </p>
-            </div>
           </div>
 
-          {/* Right: Inspector Panel */}
-          <Inspector 
-            selectedNode={selectedNode} 
-            onUpdateNode={handleUpdateNode}
+          <Inspector
+            selectedNode={selectedNode}
+            onUpdateNode={handleUpdateNodeHistory}
             aspectRatio={aspectRatio}
           />
         </div>
 
-        {/* Presentation Overlay */}
         {isPresentationOpen && (
-          <PresentationMode 
-            nodes={presentationNodes} 
-            onClose={() => setIsPresentationOpen(false)} 
+          <PresentationMode
+            nodes={presentationNodes}
+            onClose={() => setIsPresentationOpen(false)}
+            aspectRatio={aspectRatio}
           />
         )}
       </div>
