@@ -9,13 +9,14 @@ export interface StoryNodeData {
   variant?: 'scene' | 'idea' | 'mood' | 'group' | 'link';
   shotType?: ShotType;
   mediaType?: MediaType; // New field for video/audio support
-  
+
   // Link specific data
   linkUrl?: string;
   linkTitle?: string;
   linkDescription?: string;
   linkDomain?: string;
   linkImage?: string;
+  [key: string]: unknown;
 }
 
 export type AspectRatio = '16:9' | '9:16' | '1:1';

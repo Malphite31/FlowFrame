@@ -30,6 +30,7 @@ import ContextMenu from './components/ContextMenu';
 import { PresentationMode } from './components/PresentationMode';
 import { LibraryPanel } from './components/LibraryPanel';
 import { TimelinePanel } from './components/TimelinePanel';
+import { TraditionalStoryboard } from './components/TraditionalStoryboard';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { StoryNodeData, NODE_COLORS, AspectRatio, Asset, MediaType } from './types';
 import { generateUUID, sortNodesByTimeline, getExportableNodes } from './utils/exportUtils';
@@ -101,6 +102,14 @@ interface ProjectRecord {
   createdAt: number;
   thumbnailUrl?: string | null;
   isArchived: boolean;
+
+  // Mode-specific data
+  storyboardNodes?: Node<StoryNodeData>[];
+  storyboardEdges?: Edge[];
+  mindMapNodes?: Node<StoryNodeData>[];
+  mindMapEdges?: Edge[];
+  moodBoardNodes?: Node<StoryNodeData>[];
+  moodBoardEdges?: Edge[];
 }
 
 const PROJECTS_STORAGE_KEY = 'flowframe-projects';
@@ -124,7 +133,13 @@ const AppContent = () => {
           updatedAt: p.updatedAt ?? Date.now(),
           lastOpenedAt: p.lastOpenedAt ?? Date.now(),
           isArchived: p.isArchived ?? false,
-          thumbnailUrl: p.thumbnailUrl ?? null
+          thumbnailUrl: p.thumbnailUrl ?? null,
+          storyboardNodes: p.storyboardNodes || p.nodes || [],
+          storyboardEdges: p.storyboardEdges || p.edges || [],
+          mindMapNodes: p.mindMapNodes || [],
+          mindMapEdges: p.mindMapEdges || [],
+          moodBoardNodes: p.moodBoardNodes || [],
+          moodBoardEdges: p.moodBoardEdges || []
         }));
       }
     } catch (e) {
@@ -210,8 +225,21 @@ const AppContent = () => {
 
     setActiveProjectId(projectId);
     setShowDashboard(false);
-    setNodes(Array.isArray(project.nodes) ? project.nodes : []);
-    setEdges(Array.isArray(project.edges) ? project.edges : []);
+
+    // Load correct nodes based on view mode
+    let initialNodes = project.storyboardNodes || project.nodes || [];
+    let initialEdges = project.storyboardEdges || project.edges || [];
+
+    if (project.viewMode === 'mindmap') {
+      initialNodes = project.mindMapNodes || [];
+      initialEdges = project.mindMapEdges || [];
+    } else if (project.viewMode === 'moodboard') {
+      initialNodes = project.moodBoardNodes || [];
+      initialEdges = project.moodBoardEdges || [];
+    }
+
+    setNodes(initialNodes);
+    setEdges(initialEdges);
     setProjectName(project.name);
     setAspectRatio(project.aspectRatio);
     setProjectNotes(project.projectNotes);
@@ -219,12 +247,8 @@ const AppContent = () => {
     setViewMode(project.viewMode);
     setSelectedNodeId(null);
     setSelectedNodes([]);
-
-    const bundle = projectHistories[projectId] ?? { history: [{ nodes: project.nodes, edges: project.edges }], index: 0 };
-    setHistory(bundle.history);
-    setHistoryIndex(bundle.index);
-    setProjectHistories(prev => ({ ...prev, [projectId]: bundle }));
-
+    setHistory([{ nodes: initialNodes, edges: initialEdges }]);
+    setHistoryIndex(0);
     setProjects(prev => prev.map(p => p.id === projectId ? { ...p, lastOpenedAt: Date.now() } : p));
     if (pushRoute) navigate(`/projects/${projectId}`);
   }, [projects, projectHistories, navigate]);
@@ -293,9 +317,61 @@ const AppContent = () => {
   }, [updateActiveProject]);
 
   const handleSetViewMode = useCallback((mode: ViewMode) => {
+    if (mode === viewMode) return;
+
+    // Save current state to the correct bucket before switching
+    const currentNodes = nodes;
+    const currentEdges = edges;
+
+    setProjects(prev => prev.map(p => {
+      if (p.id === activeProjectId) {
+        const updates: Partial<ProjectRecord> = { viewMode: mode };
+
+        // Save current mode data
+        if (viewMode === 'storyboard' || viewMode === 'traditional') {
+          updates.storyboardNodes = currentNodes;
+          updates.storyboardEdges = currentEdges;
+          // Also update legacy fields for backward compatibility if needed, or just rely on specific fields
+          updates.nodes = currentNodes;
+          updates.edges = currentEdges;
+        } else if (viewMode === 'mindmap') {
+          updates.mindMapNodes = currentNodes;
+          updates.mindMapEdges = currentEdges;
+        } else if (viewMode === 'moodboard') {
+          updates.moodBoardNodes = currentNodes;
+          updates.moodBoardEdges = currentEdges;
+        }
+
+        return { ...p, ...updates };
+      }
+      return p;
+    }));
+
+    // Load new mode data
+    const project = projects.find(p => p.id === activeProjectId);
+    if (project) {
+      let nextNodes: Node<StoryNodeData>[] = [];
+      let nextEdges: Edge[] = [];
+
+      if (mode === 'storyboard' || mode === 'traditional') {
+        nextNodes = project.storyboardNodes || project.nodes || [];
+        nextEdges = project.storyboardEdges || project.edges || [];
+      } else if (mode === 'mindmap') {
+        nextNodes = project.mindMapNodes || [];
+        nextEdges = project.mindMapEdges || [];
+      } else if (mode === 'moodboard') {
+        nextNodes = project.moodBoardNodes || [];
+        nextEdges = project.moodBoardEdges || [];
+      }
+
+      setNodes(nextNodes);
+      setEdges(nextEdges);
+      setHistory([{ nodes: nextNodes, edges: nextEdges }]);
+      setHistoryIndex(0);
+    }
+
     setViewMode(mode);
-    updateActiveProject({ viewMode: mode }, false);
-  }, [updateActiveProject]);
+  }, [viewMode, nodes, edges, activeProjectId, projects]);
 
   const handleSetProjectNotes = useCallback((notes: string) => {
     setProjectNotes(notes);
@@ -572,7 +648,7 @@ const AppContent = () => {
     (params: Connection) => {
       if (params.source === params.target) return;
       // Record history for connection
-      const newEdges = addEdge({ ...params, type: 'default', style: { stroke: '#888', strokeWidth: 2 } }, edges);
+      const newEdges = addEdge({ ...params, type: 'default', style: { stroke: '#888', strokeWidth: 2 } } as Edge, edges);
       recordHistory(nodes, newEdges);
     },
     [nodes, edges, recordHistory]
@@ -730,10 +806,11 @@ const AppContent = () => {
 
 
   // --- AUTO LAYOUT LOGIC ---
-  const handleAutoLayout = useCallback(() => {
-    const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(nodes, edges);
+  const handleAutoLayout = useCallback((type?: string) => {
+    const layoutType = (type as any) || (viewMode === 'mindmap' ? 'mindmap' : 'default');
+    const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(nodes, edges, 'LR', layoutType);
     recordHistory(layoutedNodes, layoutedEdges);
-  }, [nodes, edges, recordHistory]);
+  }, [nodes, edges, recordHistory, viewMode]);
 
 
   // --- GROUPING LOGIC ---
@@ -889,25 +966,42 @@ const AppContent = () => {
 
   const handleAddNode = useCallback(() => {
     const id = generateUUID();
+    const isMindMap = viewMode === 'mindmap';
+    const isMoodBoard = viewMode === 'moodboard';
+
+    let variant: 'scene' | 'idea' | 'mood' = 'scene';
+    let color = NODE_COLORS.Blue;
+    let label = `Node ${nodes.length + 1}`;
+
+    if (isMindMap) {
+      variant = 'idea';
+      color = NODE_COLORS.Purple;
+      label = 'New Idea';
+    } else if (isMoodBoard) {
+      variant = 'mood';
+      color = NODE_COLORS.Gray;
+      label = 'New Mood';
+    }
+
     const newNode: Node<StoryNodeData> = {
       id,
       type: 'fusionNode',
       position: { x: 100 + (nodes.length * 50), y: 100 + (nodes.length * 50) },
       data: {
-        label: `Node ${nodes.length + 1}`,
+        label,
         description: '',
         duration: 3,
         image: null,
         fileName: null,
-        color: NODE_COLORS.Blue,
-        variant: 'scene',
-        shotType: 'wide',
+        color,
+        variant,
+        shotType: 'med',
         mediaType: 'image'
       }
     };
     const nextNodes = [...nodes, newNode];
     recordHistory(nextNodes, edges);
-  }, [nodes, edges, recordHistory]);
+  }, [nodes, edges, recordHistory, viewMode]);
 
   const handleUpdateDuration = useCallback((id: string, duration: number) => {
     // Discrete action from Timeline
@@ -1213,78 +1307,82 @@ const AppContent = () => {
           />
 
           <div className="flex-1 flex flex-col border-r border-black overflow-hidden relative">
-            <div
-              className="flex-1 relative"
-              onDragOver={onDragOver}
-              onDrop={onDrop}
-              style={{ cursor: isSpacePressed ? 'grab' : 'default' }}
-            >
-              <ErrorBoundary>
-                <ReactFlow
-                  nodes={nodes}
-                  edges={edges}
-                  onNodesChange={onNodesChange}
-                  onEdgesChange={onEdgesChange}
-                  onConnect={onConnect}
-                  onSelectionChange={onSelectionChange}
-                  onPaneClick={onPaneClick}
-                  onNodeContextMenu={onNodeContextMenu}
-                  onEdgeContextMenu={onEdgeContextMenu}
-                  onNodeDragStart={onNodeDragStart}
-                  onNodeDragStop={onNodeDragStop}
-                  nodeTypes={nodeTypes}
-                  defaultEdgeOptions={{
-                    type: 'default',
-                    style: { stroke: '#888', strokeWidth: 2 }
-                  }}
-                  fitView
-                  snapToGrid={true}
-                  snapGrid={[15, 15]}
-                  panOnDrag={isSpacePressed}
-                  selectionOnDrag={false} // prevent accidental marquee that selects extra nodes
-                  selectionMode={SelectionMode.Partial}
-                  panOnScroll={true}
-                  zoomOnScroll={true}
-                  zoomOnPinch={true}
-                  deleteKeyCode={['Backspace', 'Delete']}
-                >
-                  <Background
-                    color="#2a2a2a"
-                    variant={BackgroundVariant.Dots}
-                    gap={20}
-                    size={1}
-                  />
-                  <Controls className="!bg-[#262626] !border-[#3d3d3d] [&>button]:!fill-gray-400 [&>button]:!border-b-[#3d3d3d] hover:[&>button]:!bg-[#3d3d3d] hover:[&>button]:!fill-white" />
-                  <MiniMap
-                    nodeColor={(n) => n.data.color || '#3d3d3d'}
-                    maskColor="#181818"
-                    className="!bg-[#262626] !border-[#3d3d3d]"
-                  />
-                </ReactFlow>
-              </ErrorBoundary>
+            {viewMode === 'traditional' ? (
+              <TraditionalStoryboard nodes={nodes} aspectRatio={aspectRatio} />
+            ) : (
+              <div
+                className="flex-1 relative"
+                onDragOver={onDragOver}
+                onDrop={onDrop}
+                style={{ cursor: isSpacePressed ? 'grab' : 'default' }}
+              >
+                <ErrorBoundary>
+                  <ReactFlow
+                    nodes={nodes}
+                    edges={edges}
+                    onNodesChange={onNodesChange}
+                    onEdgesChange={onEdgesChange}
+                    onConnect={onConnect}
+                    onSelectionChange={onSelectionChange}
+                    onPaneClick={onPaneClick}
+                    onNodeContextMenu={onNodeContextMenu}
+                    onEdgeContextMenu={onEdgeContextMenu}
+                    onNodeDragStart={onNodeDragStart}
+                    onNodeDragStop={onNodeDragStop}
+                    nodeTypes={nodeTypes}
+                    defaultEdgeOptions={{
+                      type: 'default',
+                      style: { stroke: '#888', strokeWidth: 2 }
+                    }}
+                    fitView
+                    snapToGrid={true}
+                    snapGrid={[15, 15]}
+                    panOnDrag={isSpacePressed}
+                    selectionOnDrag={false} // prevent accidental marquee that selects extra nodes
+                    selectionMode={SelectionMode.Partial}
+                    panOnScroll={true}
+                    zoomOnScroll={true}
+                    zoomOnPinch={true}
+                    deleteKeyCode={['Backspace', 'Delete']}
+                  >
+                    <Background
+                      color="#2a2a2a"
+                      variant={BackgroundVariant.Dots}
+                      gap={20}
+                      size={1}
+                    />
+                    <Controls className="!bg-[#262626] !border-[#3d3d3d] [&>button]:!fill-gray-400 [&>button]:!border-b-[#3d3d3d] hover:[&>button]:!bg-[#3d3d3d] hover:[&>button]:!fill-white" />
+                    <MiniMap
+                      nodeColor={(n) => (n.data.color as string) || '#3d3d3d'}
+                      maskColor="#181818"
+                      className="!bg-[#262626] !border-[#3d3d3d]"
+                    />
+                  </ReactFlow>
+                </ErrorBoundary>
 
-              {menu && (
-                <ContextMenu
-                  x={menu.left}
-                  y={menu.top}
-                  type={menu.type}
-                  onDuplicate={handleDuplicateNode}
-                  onDelete={handleDelete}
-                  onGroup={handleGroupNodes}
-                  onUngroup={handleUngroupNodes}
-                  canGroup={canGroup}
-                  canUngroup={canUngroup}
-                  onClose={() => setMenu(null)}
-                />
-              )}
+                {menu && (
+                  <ContextMenu
+                    x={menu.left}
+                    y={menu.top}
+                    type={menu.type}
+                    onDuplicate={handleDuplicateNode}
+                    onDelete={handleDelete}
+                    onGroup={handleGroupNodes}
+                    onUngroup={handleUngroupNodes}
+                    canGroup={canGroup}
+                    canUngroup={canUngroup}
+                    onClose={() => setMenu(null)}
+                  />
+                )}
 
-              <div className="absolute top-4 left-4 bg-[#262626]/80 p-2 rounded text-xs text-gray-400 pointer-events-none border border-[#3d3d3d] z-50">
-                <p>Pre-Production Fusion v1.9</p>
-                <p className="text-[10px] mt-1 text-davinci-accent opacity-70">
-                  {isSpacePressed ? '[HAND TOOL ACTIVE]' : 'Paste URL • Drag into Groups • Ctrl+Z Undo'}
-                </p>
+                <div className="absolute top-4 left-4 bg-[#262626]/80 p-2 rounded text-xs text-gray-400 pointer-events-none border border-[#3d3d3d] z-50">
+                  <p>Pre-Production Fusion v1.9</p>
+                  <p className="text-[10px] mt-1 text-davinci-accent opacity-70">
+                    {isSpacePressed ? '[HAND TOOL ACTIVE]' : 'Paste URL • Drag into Groups • Ctrl+Z Undo'}
+                  </p>
+                </div>
               </div>
-            </div>
+            )}
 
             {viewMode === 'storyboard' && (
               <TimelinePanel
@@ -1315,9 +1413,12 @@ const AppContent = () => {
   );
 };
 
+import MobileWarning from './components/MobileWarning';
+
 export default function App() {
   return (
     <ReactFlowProvider>
+      <MobileWarning />
       <AppContent />
     </ReactFlowProvider>
   );
