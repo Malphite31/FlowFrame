@@ -13,7 +13,7 @@ export const CollaborativeCursors: React.FC<CollaborativeCursorsProps> = ({ curs
     const allCursors = myCursor ? [...cursors, myCursor] : cursors;
 
     return (
-        <div className="absolute inset-0 pointer-events-none z-50 overflow-hidden">
+        <div className="fixed inset-0 pointer-events-none z-50 overflow-hidden">
             {allCursors.map(cursor => {
                 const screenPos = flowToScreenPosition({ x: cursor.x, y: cursor.y });
                 const isMe = cursor.id === myCursor?.id;

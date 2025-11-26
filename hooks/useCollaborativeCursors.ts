@@ -1,7 +1,6 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { io, Socket } from 'socket.io-client';
-import { generateUUID } from '../utils/exportUtils';
-import { NODE_COLORS } from '../types';
+import { UserIdentity } from './useCollaborativeIdentity';
 
 const SOCKET_URL = 'http://localhost:3002';
 
@@ -15,26 +14,13 @@ export interface UserCursor {
     message?: string;
 }
 
-// Random name generator
-const ADJECTIVES = ['Swift', 'Bright', 'Cosmic', 'Neon', 'Flow', 'Zen', 'Hyper', 'Sonic'];
-const NOUNS = ['Designer', 'Coder', 'Artist', 'Mind', 'Spark', 'Wave', 'Pulse', 'Star'];
-const getRandomName = () => `${ADJECTIVES[Math.floor(Math.random() * ADJECTIVES.length)]} ${NOUNS[Math.floor(Math.random() * NOUNS.length)]}`;
-
-// Random color from our palette
-const COLORS = Object.values(NODE_COLORS);
-const getRandomColor = () => COLORS[Math.floor(Math.random() * COLORS.length)];
-
-export const useCollaborativeCursors = (projectId: string | null) => {
+export const useCollaborativeCursors = (projectId: string | null, me: UserIdentity) => {
     const [socket, setSocket] = useState<Socket | null>(null);
     const [cursors, setCursors] = useState<UserCursor[]>([]);
-    const [me, setMe] = useState<{ id: string; name: string; color: string }>(() => ({
-        id: generateUUID(),
-        name: getRandomName(),
-        color: getRandomColor()
-    }));
 
     const throttleRef = useRef<number>(0);
 
+    // Socket Connection
     useEffect(() => {
         const newSocket = io(SOCKET_URL, {
             transports: ['websocket'],
@@ -45,19 +31,8 @@ export const useCollaborativeCursors = (projectId: string | null) => {
         newSocket.on('connect', () => {
             console.log('Connected to collab server');
             if (projectId) {
-                // Announce presence in specific project room
                 newSocket.emit('join', { ...me, projectId });
             }
-        });
-
-        newSocket.on('user-joined', (user: { name: string }) => {
-            // You could use a toast library here, for now we'll just log it
-            console.log(`${user.name} joined the session`);
-            // Create a temporary "notification" cursor or event if needed
-            // For now we rely on the cursor appearing
-
-            // Dispatch a custom event that App.tsx can listen to for notifications
-            window.dispatchEvent(new CustomEvent('collaborator-joined', { detail: { name: user.name } }));
         });
 
         newSocket.on('cursor-update', (data: UserCursor) => {
@@ -70,6 +45,11 @@ export const useCollaborativeCursors = (projectId: string | null) => {
             });
         });
 
+        newSocket.on('user-joined', (user: { name: string }) => {
+            console.log(`${user.name} joined the session`);
+            window.dispatchEvent(new CustomEvent('collaborator-joined', { detail: { name: user.name } }));
+        });
+
         newSocket.on('user-disconnected', (id: string) => {
             setCursors(prev => prev.filter(c => c.id !== id));
         });
@@ -79,7 +59,15 @@ export const useCollaborativeCursors = (projectId: string | null) => {
         return () => {
             newSocket.disconnect();
         };
-    }, [me, projectId]);
+    }, []); // Only run once on mount (or if projectId changes? No, we handle projectId changes below)
+
+    // Handle Project ID changes and Identity changes
+    useEffect(() => {
+        if (socket && projectId) {
+            // Re-announce presence when project or identity changes
+            socket.emit('join', { ...me, projectId });
+        }
+    }, [socket, projectId, me.name, me.color]);
 
     // Clean up stale cursors (inactive for > 10s)
     useEffect(() => {
@@ -110,13 +98,5 @@ export const useCollaborativeCursors = (projectId: string | null) => {
         });
     }, [socket, me, projectId]);
 
-    const updateName = useCallback((newName: string) => {
-        setMe(prev => ({ ...prev, name: newName }));
-        // Re-announce join to update name for others immediately
-        if (socket && projectId) {
-            socket.emit('join', { ...me, name: newName, projectId });
-        }
-    }, [socket, me, projectId]);
-
-    return { cursors, broadcastMove, me, updateName };
+    return { cursors, broadcastMove };
 };
