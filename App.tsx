@@ -40,6 +40,8 @@ import { isValidURL, fetchLinkMetadata, getDomain, getEmbedInfo } from './utils/
 import { getLayoutedElements } from './utils/layoutUtils';
 import { SettingsContext } from './context/SettingsContext';
 import MobileWarning from './components/MobileWarning';
+import { useCollaborativeCursors } from './hooks/useCollaborativeCursors';
+import { CollaborativeCursors } from './components/CollaborativeCursors';
 
 
 // Initial Nodes for fallback demo
@@ -192,6 +194,11 @@ const AppContent = () => {
   // -- Figma Style Controls State --
   const [isSpacePressed, setIsSpacePressed] = useState(false);
 
+  // -- Cursor Chat State --
+  const [isCursorChatActive, setIsCursorChatActive] = useState(false);
+  const [chatMessage, setChatMessage] = useState('');
+  const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
+
   // -- Undo/Redo State --
   const [history, setHistory] = useState<HistoryState[]>([{ nodes: activeProject?.nodes || [], edges: activeProject?.edges || [] }]);
   const [historyIndex, setHistoryIndex] = useState(0);
@@ -201,6 +208,7 @@ const AppContent = () => {
   const dragStartRef = useRef<HistoryState | null>(null);
 
   const { screenToFlowPosition, getNodes, getEdges: getEdgesFlow, getIntersectingNodes } = useReactFlow();
+  const { cursors, broadcastMove, me, updateName } = useCollaborativeCursors(activeProjectId);
 
   // -- Settings Context Value --
   const settingsValue = useMemo(() => ({ aspectRatio }), [aspectRatio]);
@@ -1496,6 +1504,92 @@ const AppContent = () => {
     [screenToFlowPosition, createLinkNode, nodes, edges, recordHistory]
   );
 
+  // -- Collaborator Notification --
+  useEffect(() => {
+    const handleJoin = (e: Event) => {
+      const customEvent = e as CustomEvent;
+      const name = customEvent.detail.name;
+      // Simple toast notification
+      const toast = document.createElement('div');
+      toast.className = 'fixed top-20 left-1/2 transform -translate-x-1/2 bg-[#3b82f6] text-white px-4 py-2 rounded-full shadow-lg z-[100] text-sm font-medium animate-in fade-in slide-in-from-top-4 duration-300';
+      toast.textContent = `${name} joined the session`;
+      document.body.appendChild(toast);
+      setTimeout(() => {
+        toast.classList.add('opacity-0', 'transition-opacity', 'duration-500');
+        setTimeout(() => toast.remove(), 500);
+      }, 3000);
+    };
+    window.addEventListener('collaborator-joined', handleJoin);
+    return () => window.removeEventListener('collaborator-joined', handleJoin);
+  }, []);
+
+  // -- Cursor Chat Logic --
+  useEffect(() => {
+    // Hide default cursor when collaborators are present or chat is active
+    if (cursors.length > 0 || isCursorChatActive) {
+      document.body.style.cursor = 'none';
+    } else {
+      document.body.style.cursor = 'default';
+    }
+    return () => { document.body.style.cursor = 'default'; };
+  }, [cursors.length, isCursorChatActive]);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // If editing text in a node or input, ignore
+      if (document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA' || (document.activeElement as HTMLElement)?.isContentEditable) {
+        if (e.key === 'Escape' && isCursorChatActive) {
+          setIsCursorChatActive(false);
+          setChatMessage('');
+          broadcastMove(0, 0, ''); // Clear message
+        }
+        return;
+      }
+
+      if (e.key === '/' && !isCursorChatActive) {
+        e.preventDefault();
+        setIsCursorChatActive(true);
+        setChatMessage('');
+        return;
+      }
+
+      if (isCursorChatActive) {
+        if (e.key === 'Escape' || e.key === 'Enter') {
+          e.preventDefault();
+          setIsCursorChatActive(false);
+          // Clear message after a delay so people can read it
+          setTimeout(() => {
+            setChatMessage('');
+            broadcastMove(0, 0, '');
+          }, 3000);
+        } else if (e.key === 'Backspace') {
+          setChatMessage(prev => {
+            const next = prev.slice(0, -1);
+            broadcastMove(0, 0, next); // Broadcast immediately
+            return next;
+          });
+        } else if (e.key.length === 1) {
+          setChatMessage(prev => {
+            const next = prev + e.key;
+            broadcastMove(0, 0, next); // Broadcast immediately
+            return next;
+          });
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isCursorChatActive, broadcastMove]);
+
+  // Update cursor position with current message if active
+  const handleMouseMove = useCallback((e: React.MouseEvent) => {
+    const pos = screenToFlowPosition({ x: e.clientX, y: e.clientY });
+    setMousePos(pos);
+    // If chat is active, we keep broadcasting the message with the move
+    broadcastMove(pos.x, pos.y, isCursorChatActive || chatMessage ? chatMessage : undefined);
+  }, [screenToFlowPosition, broadcastMove, isCursorChatActive, chatMessage]);
+
   const canGroup = selectedNodes.length > 1;
   const canUngroup = useMemo(() => {
     if (menu && nodes.find(n => n.id === menu.id)?.type === 'groupNode') return true;
@@ -1567,7 +1661,10 @@ const AppContent = () => {
           canUndo={historyIndex > 0}
           canRedo={historyIndex < history.length - 1}
           onBackToDashboard={goToDashboard}
-          showBackToDashboard
+          showBackToDashboard={true}
+          userName={me.name}
+          onUpdateUserName={updateName}
+          userColor={me.color}
         />
 
         <div className="flex flex-1 overflow-hidden">
@@ -1622,6 +1719,7 @@ const AppContent = () => {
                     zoomOnScroll={true}
                     zoomOnPinch={true}
                     deleteKeyCode={['Backspace', 'Delete']}
+                    onMouseMove={handleMouseMove}
                   >
                     <Background
                       color="#2a2a2a"
@@ -1638,6 +1736,10 @@ const AppContent = () => {
                       className="!bg-[#262626] !border-[#3d3d3d]"
                     />
                   </ReactFlow>
+                  <CollaborativeCursors
+                    cursors={cursors}
+                    myCursor={isCursorChatActive || chatMessage ? { ...me, x: mousePos.x, y: mousePos.y, message: chatMessage, lastUpdate: Date.now() } : undefined}
+                  />
                 </ErrorBoundary>
 
                 {menu && (

@@ -24,6 +24,9 @@ interface TopBarProps {
   canRedo: boolean;
   onBackToDashboard?: () => void;
   showBackToDashboard?: boolean;
+  userName?: string;
+  onUpdateUserName?: (name: string) => void;
+  userColor?: string;
 }
 
 const TopBar: React.FC<TopBarProps> = ({
@@ -46,9 +49,21 @@ const TopBar: React.FC<TopBarProps> = ({
   canUndo,
   canRedo,
   onBackToDashboard,
-  showBackToDashboard
+  showBackToDashboard,
+  userName,
+  onUpdateUserName,
+  userColor
 }) => {
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [tempName, setTempName] = useState(userName || '');
+
+  const handleNameSubmit = () => {
+    if (onUpdateUserName && tempName.trim()) {
+      onUpdateUserName(tempName.trim());
+      setIsEditingName(false);
+    }
+  };
 
   return (
     <>
@@ -208,6 +223,44 @@ const TopBar: React.FC<TopBarProps> = ({
             </svg>
             <span>Add Node</span>
           </button>
+
+          <div className="h-6 w-[1px] bg-[#3d3d3d] mx-2"></div>
+
+          {/* Collaboration User Badge */}
+          {userName && (
+            <div className="relative ml-2">
+              {isEditingName ? (
+                <div className="flex items-center bg-[#121212] border border-[#3d3d3d] rounded px-1">
+                  <input
+                    type="text"
+                    value={tempName}
+                    onChange={(e) => setTempName(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleNameSubmit()}
+                    onBlur={handleNameSubmit}
+                    autoFocus
+                    className="bg-transparent text-xs text-white outline-none w-24 py-1"
+                  />
+                </div>
+              ) : (
+                <button
+                  onClick={() => {
+                    setTempName(userName);
+                    setIsEditingName(true);
+                  }}
+                  className="flex items-center gap-2 px-2 py-1 rounded hover:bg-[#3d3d3d] transition-colors border border-transparent hover:border-[#555]"
+                  title="Click to change your display name"
+                >
+                  <div
+                    className="w-2 h-2 rounded-full shadow-[0_0_5px_currentColor]"
+                    style={{ backgroundColor: userColor || '#4ade80', color: userColor || '#4ade80' }}
+                  ></div>
+                  <span className="text-xs text-gray-300 font-medium max-w-[100px] truncate">
+                    {userName}
+                  </span>
+                </button>
+              )}
+            </div>
+          )}
 
           <div className="h-6 w-[1px] bg-[#3d3d3d] mx-2"></div>
 
