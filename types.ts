@@ -1,4 +1,9 @@
 
+import React from 'react';
+import { Node, Edge } from '@xyflow/react';
+
+export type ViewMode = 'storyboard' | 'mindmap' | 'moodboard' | 'traditional';
+
 export interface StoryNodeData {
   label: string;
   description: string;
@@ -6,9 +11,13 @@ export interface StoryNodeData {
   image: string | null;
   fileName: string | null;
   color: string; // Hex color for markers
-  variant?: 'scene' | 'idea' | 'mood' | 'group' | 'link';
+  variant?: 'scene' | 'idea' | 'mood' | 'group' | 'link' | 'image';
   shotType?: ShotType;
   mediaType?: MediaType; // New field for video/audio support
+
+  // Mind Map specific options
+  mindMapShape?: 'rounded' | 'circle' | 'capsule' | 'square';
+  borderStyle?: 'solid' | 'dashed' | 'dotted';
 
   // Link specific data
   linkUrl?: string;
@@ -19,11 +28,32 @@ export interface StoryNodeData {
   [key: string]: unknown;
 }
 
+export interface ProjectTemplate {
+  id: string;
+  name: string;
+  description: string;
+  previewColor: string;
+  icon?: React.ReactNode;
+  data: {
+    nodes: Node<StoryNodeData>[];
+    edges: Edge[];
+    projectNotes: string;
+    viewMode: ViewMode;
+    aspectRatio?: AspectRatio;
+  }
+}
+
 export type AspectRatio = '16:9' | '9:16' | '1:1';
 
 export type ShotType = 'WS' | 'wide' | 'med' | 'MCU' | 'CU' | 'ECU' | 'pov' | 'drone' | 'est';
 
-export type MediaType = 'image' | 'video' | 'audio' | 'link';
+export type MediaType = 'image' | 'video' | 'audio' | 'link' | 'embed';
+
+export interface NodePreset {
+  id: string;
+  name: string;
+  data: Partial<StoryNodeData>;
+}
 
 export interface Asset {
   id: string;
@@ -36,6 +66,8 @@ export interface Asset {
     title?: string;
     description?: string;
     image?: string;
+    originalUrl?: string;
+    provider?: string;
   };
 }
 

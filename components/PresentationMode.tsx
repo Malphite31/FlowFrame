@@ -1,4 +1,5 @@
 
+
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { Node } from '@xyflow/react';
 import { StoryNodeData, AspectRatio } from '../types';
@@ -22,8 +23,8 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({ nodes, onClo
   const duration = useMemo(() => (currentNode?.data.duration || 3) * 1000, [currentNode]);
   
   const startTimeRef = useRef<number>(Date.now());
-  const requestRef = useRef<number>();
-  const controlsTimeoutRef = useRef<ReturnType<typeof setTimeout>>();
+  const requestRef = useRef<number | null>(null);
+  const controlsTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Handle Window Resize to constrain player to Aspect Ratio
   useEffect(() => {
@@ -32,7 +33,7 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({ nodes, onClo
       const availableWidth = window.innerWidth - padding;
       const availableHeight = window.innerHeight - padding;
       
-      const [rW, rH] = aspectRatio.split(':').map(Number);
+      const [rW, rH] = aspectRatio.split(':').map(n => Number(n));
       const targetRatio = rW / rH;
       const windowRatio = availableWidth / availableHeight;
 
@@ -158,6 +159,13 @@ export const PresentationMode: React.FC<PresentationModeProps> = ({ nodes, onClo
               {currentNode.data.image ? (
                 currentNode.data.mediaType === 'video' ? (
                    <video src={currentNode.data.image} className="w-full h-full object-contain" muted />
+                ) : currentNode.data.mediaType === 'embed' ? (
+                   <iframe 
+                        src={currentNode.data.image} 
+                        className="w-full h-full border-0" 
+                        allow="autoplay; encrypted-media; fullscreen"
+                        allowFullScreen
+                   />
                 ) : (
                    <img 
                       src={currentNode.data.image} 

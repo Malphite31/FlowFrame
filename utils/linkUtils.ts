@@ -1,4 +1,5 @@
 
+
 export const isValidURL = (string: string) => {
   try {
     const url = new URL(string);
@@ -59,7 +60,6 @@ const parseHtml = (html: string, url: string): LinkMetadata => {
 // Fetches OpenGraph data using public proxies to bypass CORS
 export const fetchLinkMetadata = async (url: string): Promise<LinkMetadata> => {
   // Strategy 1: corsproxy.io (Direct HTML)
-  // This is often faster and returns the raw page, allowing for better parsing.
   try {
     const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(url)}`;
     const response = await fetch(proxyUrl);
@@ -68,11 +68,10 @@ export const fetchLinkMetadata = async (url: string): Promise<LinkMetadata> => {
         return parseHtml(html, url);
     }
   } catch (e) {
-    // Silent fail, try next strategy
+    // Silent fail
   }
 
-  // Strategy 2: allorigins.win (JSON wrapper)
-  // This wraps the response in JSON, useful if the direct fetch is blocked.
+  // Strategy 2: allorigins.win
   try {
     const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`;
     const response = await fetch(proxyUrl);
@@ -86,11 +85,50 @@ export const fetchLinkMetadata = async (url: string): Promise<LinkMetadata> => {
     // Silent fail
   }
 
-  // Fallback: Just return basic info to ensure UI doesn't break
   return {
       url,
       title: getDomain(url),
       description: 'No preview available',
       image: ''
   };
+};
+
+export interface EmbedInfo {
+    type: 'embed';
+    url: string; // The embeddable URL (iframe src)
+    provider: string;
+    originalUrl: string;
+    thumbnail?: string;
+}
+
+export const getEmbedInfo = (url: string): EmbedInfo | null => {
+    // YouTube
+    // Supports: youtube.com/watch?v=ID, youtu.be/ID, youtube.com/embed/ID
+    const ytRegExp = /^(?:https?:\/\/)?(?:www\.)?(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=))([\w-]{11})(?:\S+)?$/;
+    const ytMatch = url.match(ytRegExp);
+    if (ytMatch && ytMatch[1]) {
+        return {
+            type: 'embed',
+            url: `https://www.youtube.com/embed/${ytMatch[1]}`,
+            provider: 'YouTube',
+            originalUrl: url,
+            thumbnail: `https://img.youtube.com/vi/${ytMatch[1]}/0.jpg`
+        };
+    }
+
+    // Vimeo
+    // Supports: vimeo.com/ID, player.vimeo.com/video/ID
+    const vimeoRegExp = /(?:www\.|player\.)?vimeo.com\/(?:channels\/(?:\w+\/)?|groups\/(?:[^\/]*)\/videos\/|album\/(?:\d+)\/video\/|video\/|)(\d+)(?:[a-zA-Z0-9_\-]+)?/i;
+    const vimeoMatch = url.match(vimeoRegExp);
+    if (vimeoMatch && vimeoMatch[1]) {
+        return {
+            type: 'embed',
+            url: `https://player.vimeo.com/video/${vimeoMatch[1]}`,
+            provider: 'Vimeo',
+            originalUrl: url
+            // Vimeo thumbnails require API call, skipping for sync simplicity
+        };
+    }
+
+    return null;
 };

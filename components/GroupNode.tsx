@@ -3,7 +3,8 @@ import React, { memo } from 'react';
 import { NodeProps, NodeResizer } from '@xyflow/react';
 import { StoryNodeData } from '../types';
 
-const GroupNode = ({ data, selected }: NodeProps<StoryNodeData>) => {
+const GroupNode = ({ data: propData, selected }: NodeProps) => {
+  const data = propData as StoryNodeData;
   return (
     <>
       <NodeResizer 

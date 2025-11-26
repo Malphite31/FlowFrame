@@ -1,7 +1,8 @@
 
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useState, useEffect } from 'react';
 import { Node } from '@xyflow/react';
-import { StoryNodeData, NODE_COLORS, AspectRatio, ShotType } from '../types';
+import { StoryNodeData, NODE_COLORS, AspectRatio, ShotType, NodePreset } from '../types';
+import { generateUUID } from '../utils/exportUtils';
 
 interface InspectorProps {
   selectedNode: Node<StoryNodeData> | null;
@@ -20,11 +21,76 @@ const SHOT_TYPES: { value: ShotType; label: string }[] = [
   { value: 'drone', label: 'Drone / Aerial' },
 ];
 
+const PRESETS_STORAGE_KEY = 'flowframe-presets';
+
 const Inspector: React.FC<InspectorProps> = ({ selectedNode, onUpdateNode, aspectRatio }) => {
   const [isDragOver, setIsDragOver] = useState(false);
+  const [presets, setPresets] = useState<NodePreset[]>([]);
 
   // Safe access to ID for hooks (hooks must be unconditional)
   const nodeId = selectedNode?.id;
+
+  // Load presets on mount
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem(PRESETS_STORAGE_KEY);
+      if (stored) {
+        setPresets(JSON.parse(stored));
+      } else {
+        // Default presets
+        const defaults: NodePreset[] = [
+           { id: 'def1', name: 'Action Red', data: { color: NODE_COLORS.Red, variant: 'scene', duration: 2 } },
+           { id: 'def2', name: 'Idea Bubble', data: { color: NODE_COLORS.Purple, variant: 'idea' } },
+           { id: 'def3', name: 'Drone Shot', data: { color: NODE_COLORS.Blue, variant: 'scene', shotType: 'drone', duration: 8 } }
+        ];
+        setPresets(defaults);
+        localStorage.setItem(PRESETS_STORAGE_KEY, JSON.stringify(defaults));
+      }
+    } catch (e) {
+      console.error("Failed to load presets", e);
+    }
+  }, []);
+
+  const handleSavePreset = () => {
+    if (!selectedNode) return;
+    const name = prompt("Enter a name for this preset:");
+    if (!name) return;
+
+    const { data } = selectedNode;
+    // We only save stylistic attributes, not content (label, description, image)
+    const presetData: Partial<StoryNodeData> = {
+      color: data.color,
+      variant: data.variant,
+      shotType: data.shotType,
+      duration: data.duration,
+      mindMapShape: data.mindMapShape,
+      borderStyle: data.borderStyle
+    };
+
+    const newPreset: NodePreset = {
+      id: generateUUID(),
+      name,
+      data: presetData
+    };
+
+    const updatedPresets = [...presets, newPreset];
+    setPresets(updatedPresets);
+    localStorage.setItem(PRESETS_STORAGE_KEY, JSON.stringify(updatedPresets));
+  };
+
+  const handleApplyPreset = (preset: NodePreset) => {
+    if (!nodeId) return;
+    onUpdateNode(nodeId, preset.data);
+  };
+
+  const handleDeletePreset = (e: React.MouseEvent, id: string) => {
+    e.stopPropagation();
+    if(confirm("Delete this preset?")) {
+        const updatedPresets = presets.filter(p => p.id !== id);
+        setPresets(updatedPresets);
+        localStorage.setItem(PRESETS_STORAGE_KEY, JSON.stringify(updatedPresets));
+    }
+  };
 
   // Auto-calculate duration based on word count (approx 2.5 words/sec)
   const handleScriptChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -100,6 +166,7 @@ const Inspector: React.FC<InspectorProps> = ({ selectedNode, onUpdateNode, aspec
   const { data, id } = selectedNode;
   const isGroup = data.variant === 'group';
   const isLink = data.variant === 'link';
+  const isIdea = data.variant === 'idea';
 
   return (
     <div className="w-80 bg-[#262626] border-l border-black flex flex-col h-full">
@@ -119,6 +186,43 @@ const Inspector: React.FC<InspectorProps> = ({ selectedNode, onUpdateNode, aspec
       
       <div className="p-4 flex flex-col gap-6 overflow-y-auto custom-scrollbar">
         
+        {/* Presets Section */}
+        {!isGroup && !isLink && (
+            <div className="flex flex-col gap-2 border-b border-[#3d3d3d] pb-4">
+                 <div className="flex justify-between items-center">
+                    <label className="text-xs text-gray-400 font-bold uppercase">Presets</label>
+                    <button 
+                        onClick={handleSavePreset}
+                        className="text-[10px] bg-[#3d3d3d] hover:bg-davinci-accent hover:text-black text-white px-2 py-0.5 rounded transition-colors"
+                        title="Save current style as preset"
+                    >
+                        + Save
+                    </button>
+                 </div>
+                 <div className="flex flex-wrap gap-1.5">
+                    {presets.map(preset => (
+                        <div 
+                            key={preset.id}
+                            onClick={() => handleApplyPreset(preset)}
+                            className="group flex items-center gap-1.5 bg-[#121212] border border-[#3d3d3d] hover:border-davinci-accent hover:text-davinci-accent text-gray-400 px-2 py-1 rounded-full text-[10px] cursor-pointer transition-all"
+                        >
+                            <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: preset.data.color || '#888' }}></div>
+                            <span>{preset.name}</span>
+                            <button 
+                                onClick={(e) => handleDeletePreset(e, preset.id)}
+                                className="opacity-0 group-hover:opacity-100 text-red-400 hover:text-red-300 ml-1 font-bold"
+                            >
+                                &times;
+                            </button>
+                        </div>
+                    ))}
+                    {presets.length === 0 && (
+                        <span className="text-[10px] text-gray-600 italic">No presets saved.</span>
+                    )}
+                 </div>
+            </div>
+        )}
+
         {/* Node Type Selector (Hide for Group) */}
         {!isGroup && !isLink && (
           <div className="flex bg-[#121212] p-1 rounded border border-[#3d3d3d]">
@@ -183,6 +287,46 @@ const Inspector: React.FC<InspectorProps> = ({ selectedNode, onUpdateNode, aspec
                       rows={3}
                       className="bg-[#121212] border border-[#3d3d3d] text-gray-300 p-2 rounded text-sm focus:border-davinci-accent outline-none resize-none"
                    />
+                </div>
+            </div>
+        )}
+
+        {/* MIND MAP OPTIONS */}
+        {isIdea && (
+            <div className="flex flex-col gap-3 border-b border-[#3d3d3d] pb-4">
+                {/* Shape */}
+                <div className="flex flex-col gap-2">
+                    <label className="text-xs text-gray-400 font-bold uppercase">Shape</label>
+                    <div className="flex bg-[#121212] rounded border border-[#3d3d3d] p-1 gap-1">
+                        {['rounded', 'circle', 'capsule', 'square'].map((shape) => (
+                            <button
+                                key={shape}
+                                onClick={() => onUpdateNode(id, { mindMapShape: shape as any })}
+                                className={`flex-1 h-8 flex items-center justify-center rounded transition-all ${(!data.mindMapShape && shape === 'rounded') || data.mindMapShape === shape ? 'bg-[#3d3d3d] text-white' : 'text-gray-500 hover:bg-[#2a2a2a]'}`}
+                                title={shape}
+                            >
+                                {shape === 'rounded' && <div className="w-4 h-4 border border-current rounded"></div>}
+                                {shape === 'circle' && <div className="w-4 h-4 border border-current rounded-full"></div>}
+                                {shape === 'capsule' && <div className="w-5 h-3 border border-current rounded-full"></div>}
+                                {shape === 'square' && <div className="w-4 h-4 border border-current rounded-none"></div>}
+                            </button>
+                        ))}
+                    </div>
+                </div>
+                {/* Border Style */}
+                <div className="flex flex-col gap-2">
+                    <label className="text-xs text-gray-400 font-bold uppercase">Border</label>
+                    <div className="flex bg-[#121212] rounded border border-[#3d3d3d] p-1 gap-1">
+                        {['solid', 'dashed', 'dotted'].map((style) => (
+                            <button
+                                key={style}
+                                onClick={() => onUpdateNode(id, { borderStyle: style as any })}
+                                className={`flex-1 h-6 text-[10px] uppercase rounded transition-all ${(!data.borderStyle && style === 'solid') || data.borderStyle === style ? 'bg-[#3d3d3d] text-white' : 'text-gray-500 hover:bg-[#2a2a2a]'}`}
+                            >
+                                {style}
+                            </button>
+                        ))}
+                    </div>
                 </div>
             </div>
         )}

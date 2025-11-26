@@ -3,77 +3,77 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>FlowFrame - Node Based Storyboarding</title>
+    <title>FlowFrame - Pre-production Fusion</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xyflow/react@12/dist/style.css" />
-    <script>
-      tailwind.config = {
-        theme: {
-          extend: {
-            colors: {
-              davinci: {
-                bg: '#181818',
-                panel: '#262626',
-                input: '#121212',
-                border: '#3d3d3d',
-                accent: '#5e9aff', // Fusion blue
-                text: '#d4d4d4',
-                muted: '#808080'
-              }
-            },
-            fontFamily: {
-              sans: ['Inter', 'sans-serif'],
-            }
-          }
-        }
-      }
-    </script>
+    <link href="https://cdn.jsdelivr.net/npm/@xyflow/react/dist/style.css" rel="stylesheet" />
     <style>
-      /* Custom Scrollbar for DaVinci feel */
-      ::-webkit-scrollbar {
+      @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+      
+      body {
+        font-family: 'Inter', sans-serif;
+        background-color: #1e1e1e;
+        color: #e5e5e5;
+        overflow: hidden;
+      }
+      
+      /* Custom Scrollbar */
+      .custom-scrollbar::-webkit-scrollbar {
         width: 8px;
         height: 8px;
       }
-      ::-webkit-scrollbar-track {
-        background: #181818;
+      .custom-scrollbar::-webkit-scrollbar-track {
+        background: #1a1a1a;
       }
-      ::-webkit-scrollbar-thumb {
+      .custom-scrollbar::-webkit-scrollbar-thumb {
         background: #3d3d3d;
         border-radius: 4px;
       }
-      ::-webkit-scrollbar-thumb:hover {
-        background: #555;
-      }
-      body {
-        background-color: #181818;
-        color: #d4d4d4;
-        overflow: hidden;
-      }
-      /* React Flow Overrides */
-      .react-flow__minimap {
-        border-radius: 6px;
-        overflow: hidden;
+      .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+        background: #4d4d4d;
       }
     </style>
     <script type="importmap">
 {
   "imports": {
     "react": "https://esm.sh/react@18.2.0",
-    "react/jsx-runtime": "https://esm.sh/react@18.2.0/jsx-runtime?deps=react@18.2.0",
-    "react-dom/client": "https://esm.sh/react-dom@18.2.0/client?deps=react@18.2.0",
-    "react-dom": "https://esm.sh/react-dom@18.2.0?deps=react@18.2.0",
-    "@xyflow/react": "https://esm.sh/@xyflow/react@12.0.0?external=react,react-dom",
+    "react/": "https://esm.sh/react@18.2.0/",
+    "react-dom": "https://esm.sh/react-dom@18.2.0",
+    "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
     "dagre": "https://esm.sh/dagre@0.8.5",
+    "@xyflow/react": "https://esm.sh/@xyflow/react@12.0.0?external=react,react-dom",
+    "@xyflow/system": "https://esm.sh/@xyflow/system@0.0.34",
+    "classcat": "https://esm.sh/classcat@5.0.3",
+    "zustand": "https://esm.sh/zustand@4.5.2",
+    "path": "https://esm.sh/path-browserify",
     "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/",
-    "react/": "https://aistudiocdn.com/react@^19.2.0/"
+    "vite": "https://aistudiocdn.com/vite@^7.2.4",
+    "@vitejs/plugin-react": "https://aistudiocdn.com/@vitejs/plugin-react@^5.1.1"
   }
 }
 </script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              'davinci-bg': '#1e1e1e',
+              'davinci-panel': '#262626', 
+              'davinci-border': '#3d3d3d',
+              'davinci-text': '#e5e5e5',
+              'davinci-accent': '#5e9aff',
+            },
+            fontFamily: {
+              sans: ['Inter', 'sans-serif'],
+              mono: ['JetBrains Mono', 'monospace'],
+            }
+          }
+        }
+      }
+    </script>
   <link rel="stylesheet" href="/index.css">
 </head>
   <body>
     <div id="root"></div>
-  <script type="module" src="/index.tsx"></script>
-</body>
+    <script type="module" src="/index.tsx"></script>
+  </body>
 </html>

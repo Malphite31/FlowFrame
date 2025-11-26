@@ -1,9 +1,10 @@
 
+
 import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { Node } from '@xyflow/react';
 import { StoryNodeData, NODE_COLORS, Asset, MediaType } from '../types';
 import { generateUUID } from '../utils/exportUtils';
-import { fetchLinkMetadata, isValidURL } from '../utils/linkUtils';
+import { fetchLinkMetadata, isValidURL, getEmbedInfo } from '../utils/linkUtils';
 import { 
   hexToHSL, 
   hslToHex, 
@@ -37,6 +38,7 @@ export const LibraryPanel: React.FC<LibraryPanelProps> = ({
   const [sortBy, setSortBy] = useState<'date' | 'name'>('date');
   const [selectedAssetId, setSelectedAssetId] = useState<string | null>(null);
   const [tagInput, setTagInput] = useState('');
+  const [assetNameInput, setAssetNameInput] = useState('');
   
   // Link Input State
   const [linkInput, setLinkInput] = useState('');
@@ -189,7 +191,10 @@ export const LibraryPanel: React.FC<LibraryPanelProps> = ({
     let result = assets.filter(a => {
       const matchesSearch = a.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
                             a.tags.some(t => t.toLowerCase().includes(searchTerm.toLowerCase()));
-      const matchesType = filterType === 'all' || a.type === filterType;
+      // If 'video' is selected, show 'embed' as well
+      let matchesType = filterType === 'all' || a.type === filterType;
+      if (filterType === 'video' && a.type === 'embed') matchesType = true;
+      
       return matchesSearch && matchesType;
     });
 
@@ -200,6 +205,13 @@ export const LibraryPanel: React.FC<LibraryPanelProps> = ({
   }, [assets, searchTerm, filterType, sortBy]);
 
   const selectedAsset = useMemo(() => assets.find(a => a.id === selectedAssetId), [assets, selectedAssetId]);
+
+  // Sync name input when selected asset changes
+  useEffect(() => {
+    if (selectedAsset) {
+      setAssetNameInput(selectedAsset.name);
+    }
+  }, [selectedAsset]);
 
   // Asset Handlers
   const handleDrag = useCallback((e: React.DragEvent) => {
@@ -232,20 +244,40 @@ export const LibraryPanel: React.FC<LibraryPanelProps> = ({
     setIsAddingLink(true);
     
     try {
-        const meta = await fetchLinkMetadata(linkInput);
-        onAddAsset({
-            id: generateUUID(),
-            type: 'link',
-            url: linkInput,
-            name: meta.title || linkInput,
-            tags: ['link'],
-            dateAdded: Date.now(),
-            meta: {
-                title: meta.title,
-                description: meta.description,
-                image: meta.image
-            }
-        });
+        // Check if it's an embeddable video URL first
+        const embedInfo = getEmbedInfo(linkInput);
+        
+        if (embedInfo) {
+             onAddAsset({
+                id: generateUUID(),
+                type: 'embed',
+                url: embedInfo.url, // The embeddable iframe URL
+                name: `${embedInfo.provider} Video`,
+                tags: ['video', 'embed', embedInfo.provider.toLowerCase()],
+                dateAdded: Date.now(),
+                meta: {
+                    originalUrl: embedInfo.originalUrl,
+                    provider: embedInfo.provider,
+                    image: embedInfo.thumbnail
+                }
+             });
+        } else {
+             // Standard Link Asset
+             const meta = await fetchLinkMetadata(linkInput);
+             onAddAsset({
+                id: generateUUID(),
+                type: 'link',
+                url: linkInput,
+                name: meta.title || linkInput,
+                tags: ['link'],
+                dateAdded: Date.now(),
+                meta: {
+                    title: meta.title,
+                    description: meta.description,
+                    image: meta.image
+                }
+             });
+        }
         setLinkInput('');
     } catch (e) {
         console.error("Failed to add link asset", e);
@@ -270,8 +302,10 @@ export const LibraryPanel: React.FC<LibraryPanelProps> = ({
     event.dataTransfer.setData('application/reactflow/mediaType', asset.type);
     event.dataTransfer.setData('application/reactflow/source', asset.url);
     if (asset.type === 'link' && asset.meta) {
-         // Pass metadata for link nodes
          event.dataTransfer.setData('application/reactflow/linkMeta', JSON.stringify(asset.meta));
+    }
+    if (asset.type === 'embed' && asset.meta) {
+        event.dataTransfer.setData('application/reactflow/embedMeta', JSON.stringify(asset.meta));
     }
     event.dataTransfer.effectAllowed = 'copy';
   };
@@ -378,16 +412,18 @@ export const LibraryPanel: React.FC<LibraryPanelProps> = ({
     const safeColors = colors && colors.length > 0 ? colors : ['#000'];
     return (
       <div className="flex flex-col gap-1 mb-1">
-        <span className="text-[10px] text-gray-400 font-medium uppercase tracking-tight">{label}</span>
+        <span className="text-[9px] text-gray-400 font-medium uppercase tracking-tight">{label}</span>
         <div className="grid grid-flow-col auto-cols-fr gap-1">
           {safeColors.map((c, i) => (
              <div 
                key={`${label}-${i}-${c}`} 
                onClick={() => handleColorClick(c)} 
-               className="h-5 rounded-[3px] cursor-pointer border border-black/20 hover:scale-105 hover:z-10 hover:border-white transition-all relative group shadow-sm" 
+               // Use ring-inset for visibility even on white colors
+               className="h-5 rounded-[3px] cursor-pointer ring-1 ring-inset ring-white/10 hover:scale-105 hover:z-10 hover:ring-2 hover:ring-white transition-all relative group" 
                style={{ backgroundColor: c }} 
                title={`${label}: ${c.toUpperCase()}`}
              >
+               {/* Inner Glow for extra definition */}
                <div className="absolute inset-0 opacity-0 group-hover:opacity-100 bg-black/10 flex items-center justify-center rounded-[3px]">
                   <div className="w-1 h-1 bg-white rounded-full shadow-sm"></div>
                </div>
@@ -440,20 +476,20 @@ export const LibraryPanel: React.FC<LibraryPanelProps> = ({
                     <input type="file" className="hidden" multiple accept="image/*,video/*,audio/*" onChange={handleFileUpload} />
                 </label>
 
-                {/* Add Link Input */}
+                {/* Add Link/Embed Input */}
                 <div className="flex gap-1">
                     <input 
                         type="text" 
                         value={linkInput}
                         onChange={(e) => setLinkInput(e.target.value)}
-                        placeholder="Paste URL to add link asset..."
+                        placeholder="Paste URL (YouTube/Vimeo/Link)..."
                         className="flex-1 bg-[#121212] border border-[#3d3d3d] rounded px-2 py-1.5 text-xs text-white focus:border-davinci-accent outline-none"
                     />
                     <button 
                         onClick={handleAddLink}
                         disabled={isAddingLink || !linkInput}
                         className="bg-[#3d3d3d] hover:bg-davinci-accent hover:text-black text-white px-2 rounded disabled:opacity-50 transition-colors"
-                        title="Add Link Asset"
+                        title="Add Link or Embed"
                     >
                         {isAddingLink ? (
                             <div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
@@ -528,6 +564,21 @@ export const LibraryPanel: React.FC<LibraryPanelProps> = ({
                                             </div>
                                         </>
                                       )}
+                                      {asset.type === 'embed' && (
+                                          <>
+                                            {asset.meta?.image ? (
+                                                <img src={asset.meta.image} className="w-full h-full object-cover opacity-80" />
+                                            ) : (
+                                                <div className="flex flex-col items-center justify-center gap-1">
+                                                    <svg className="w-8 h-8 text-red-500" fill="currentColor" viewBox="0 0 24 24"><path d="M19.615 3.184c-3.604-.246-11.631-.245-15.23 0-3.897.266-4.356 2.62-4.385 8.816.029 6.185.484 8.549 4.385 8.816 3.6.245 11.626.246 15.23 0 3.897-.266 4.356-2.62 4.385-8.816-.029-6.185-.484-8.549-4.385-8.816zm-10.615 12.816v-8l8 3.993-8 4.007z"/></svg>
+                                                    <span className="text-[9px] text-gray-500">Embed</span>
+                                                </div>
+                                            )}
+                                            <div className="absolute top-1 right-1 bg-black/70 px-1 rounded text-[8px] text-white">
+                                                {asset.meta?.provider || 'Video'}
+                                            </div>
+                                          </>
+                                      )}
                                       {asset.type === 'audio' && (
                                          <div className="flex flex-col items-center gap-1 p-2 text-center">
                                              <svg className="w-8 h-8 text-davinci-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" /></svg>
@@ -556,7 +607,7 @@ export const LibraryPanel: React.FC<LibraryPanelProps> = ({
                                             </a>
                                          </>
                                       )}
-                                      {asset.type !== 'link' && (
+                                      {asset.type !== 'link' && asset.type !== 'embed' && (
                                           <button 
                                               onClick={(e) => handleDownloadAsset(e, asset)}
                                               className="absolute top-1 right-1 p-1 bg-black/60 hover:bg-davinci-accent hover:text-black text-white rounded opacity-0 group-hover:opacity-100 transition-opacity z-10"
@@ -590,20 +641,47 @@ export const LibraryPanel: React.FC<LibraryPanelProps> = ({
                 {selectedAsset && (
                     <div className="mt-auto bg-[#1a1a1a] p-3 rounded border-t border-[#3d3d3d] flex flex-col gap-2">
                         <div className="flex justify-between items-start">
-                            <div className="overflow-hidden">
-                                <h4 className="text-xs font-bold text-white truncate w-48" title={selectedAsset.name}>{selectedAsset.name}</h4>
-                                <span className="text-[9px] text-gray-500 uppercase">{selectedAsset.type}</span>
+                            <div className="overflow-hidden flex-1 mr-2">
+                                <input 
+                                    type="text"
+                                    value={assetNameInput}
+                                    onChange={(e) => setAssetNameInput(e.target.value)}
+                                    onBlur={() => {
+                                        if (selectedAsset && assetNameInput.trim() !== selectedAsset.name) {
+                                            onUpdateAsset(selectedAsset.id, { name: assetNameInput.trim() });
+                                        }
+                                    }}
+                                    onKeyDown={(e) => {
+                                        if (e.key === 'Enter') {
+                                            e.currentTarget.blur();
+                                        }
+                                    }}
+                                    className="text-xs font-bold text-white bg-transparent border border-transparent hover:border-[#3d3d3d] focus:border-davinci-accent focus:bg-[#121212] outline-none w-full rounded px-1 -ml-1 truncate transition-colors"
+                                    title="Click to rename"
+                                />
+                                <span className="text-[9px] text-gray-500 uppercase block mt-0.5">{selectedAsset.type}</span>
                             </div>
-                            <button 
-                                onClick={() => {
-                                    onDeleteAsset(selectedAsset.id);
-                                    setSelectedAssetId(null);
-                                }}
-                                className="text-red-400 hover:text-red-300 p-1"
-                                title="Delete Asset"
-                            >
-                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
-                            </button>
+                            <div className="flex gap-1 shrink-0">
+                                {selectedAsset.type !== 'link' && selectedAsset.type !== 'embed' && (
+                                    <button 
+                                        onClick={(e) => handleDownloadAsset(e, selectedAsset)}
+                                        className="text-gray-400 hover:text-davinci-accent p-1"
+                                        title="Download"
+                                    >
+                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+                                    </button>
+                                )}
+                                <button 
+                                    onClick={() => {
+                                        onDeleteAsset(selectedAsset.id);
+                                        setSelectedAssetId(null);
+                                    }}
+                                    className="text-red-400 hover:text-red-300 p-1"
+                                    title="Delete Asset"
+                                >
+                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                                </button>
+                            </div>
                         </div>
                         <div className="flex flex-col gap-1.5">
                             <div className="flex flex-wrap gap-1">
@@ -736,7 +814,7 @@ export const LibraryPanel: React.FC<LibraryPanelProps> = ({
                     </div>
 
                     {/* 4. Affinity-style Harmonies (2 Columns) */}
-                    <div className="flex-1 overflow-y-auto pr-1 custom-scrollbar flex gap-3">
+                    <div className="flex-1 overflow-y-auto pr-1 custom-scrollbar flex gap-3 p-1">
                          {/* LEFT COLUMN */}
                          <div className="flex-1 flex flex-col gap-2">
                             {renderSwatches(tints, "Tints")}
@@ -770,12 +848,12 @@ export const LibraryPanel: React.FC<LibraryPanelProps> = ({
                                 <button onClick={saveCurrentColor} className="text-[9px] bg-[#333] text-white hover:bg-[#444] px-2 py-0.5 rounded">+ Save</button>
                              </div>
                         </div>
-                        <div className="flex flex-wrap gap-1.5 max-h-40 overflow-y-auto">
+                        <div className="flex flex-wrap gap-1.5 max-h-40 overflow-y-auto p-1">
                             {savedColors.map((c, i) => (
                                 <div 
                                     key={i} 
                                     onClick={() => handleColorClick(c)} 
-                                    className="w-6 h-6 rounded-md bg-gray-800 border border-black/40 cursor-pointer hover:scale-110 hover:shadow-lg hover:border-white transition-all relative group" 
+                                    className="w-6 h-6 rounded-md bg-gray-800 ring-1 ring-inset ring-white/10 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.2)] cursor-pointer hover:scale-110 hover:shadow-lg hover:ring-white transition-all relative group" 
                                     style={{ background: c }}
                                     title={c}
                                 >

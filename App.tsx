@@ -19,11 +19,12 @@ import {
   useReactFlow,
   SelectionMode,
   OnSelectionChangeParams,
+  ConnectionLineType,
 } from '@xyflow/react';
 
 import FusionNode from './components/FusionNode';
 import GroupNode from './components/GroupNode';
-import TopBar, { ViewMode } from './components/TopBar';
+import TopBar from './components/TopBar';
 import Dashboard from './components/Dashboard';
 import Inspector from './components/Inspector';
 import ContextMenu from './components/ContextMenu';
@@ -32,13 +33,16 @@ import { LibraryPanel } from './components/LibraryPanel';
 import { TimelinePanel } from './components/TimelinePanel';
 import { TraditionalStoryboard } from './components/TraditionalStoryboard';
 import { ErrorBoundary } from './components/ErrorBoundary';
-import { StoryNodeData, NODE_COLORS, AspectRatio, Asset, MediaType } from './types';
+import { StoryNodeData, NODE_COLORS, AspectRatio, Asset, MediaType, ProjectTemplate, ViewMode } from './types';
+import { TEMPLATES } from './utils/templates';
 import { generateUUID, sortNodesByTimeline, getExportableNodes } from './utils/exportUtils';
-import { isValidURL, fetchLinkMetadata, getDomain } from './utils/linkUtils';
+import { isValidURL, fetchLinkMetadata, getDomain, getEmbedInfo } from './utils/linkUtils';
 import { getLayoutedElements } from './utils/layoutUtils';
 import { SettingsContext } from './context/SettingsContext';
+import MobileWarning from './components/MobileWarning';
 
-// Initial Nodes for demo
+
+// Initial Nodes for fallback demo
 const initialNodes: Node<StoryNodeData>[] = [
   {
     id: '1',
@@ -208,14 +212,18 @@ const AppContent = () => {
         localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(projects));
       } catch (error) {
         console.error('Failed to save projects to local storage:', error);
-        // Optional: User notification logic here
+        // Alert user about quota limit
+        if (error instanceof DOMException && error.name === 'QuotaExceededError') {
+          console.warn('Local storage is full. Images might be too large.');
+        }
       }
     }
   }, [projects]);
 
+  // Navigation Helper: Use Hash Routing to prevent SecurityError in Sandboxes/Blobs
   const navigate = useCallback((path: string) => {
     if (typeof window !== 'undefined') {
-      window.history.pushState({}, '', path);
+      window.location.hash = path;
     }
   }, []);
 
@@ -255,6 +263,7 @@ const AppContent = () => {
     setHistory([{ nodes: initialNodes, edges: initialEdges }]);
     setHistoryIndex(0);
     setProjects(prev => prev.map(p => p.id === projectId ? { ...p, lastOpenedAt: Date.now() } : p));
+
     if (pushRoute) navigate(`/projects/${projectId}`);
   }, [projects, projectHistories, navigate]);
 
@@ -294,7 +303,55 @@ const AppContent = () => {
     setSelectedNodeId(null);
     setSelectedNodes([]);
     navigate(`/projects/${id}`);
-  }, []);
+  }, [navigate]);
+
+  // --- CREATE FROM TEMPLATE LOGIC ---
+  const handleCreateFromTemplate = useCallback((template: ProjectTemplate) => {
+    const id = generateUUID();
+    // Deep copy to avoid reference issues
+    const newNodes = JSON.parse(JSON.stringify(template.data.nodes));
+    const newEdges = JSON.parse(JSON.stringify(template.data.edges));
+
+    const newProject: ProjectRecord = {
+      id,
+      name: template.name,
+      nodes: newNodes,
+      edges: newEdges,
+      projectNotes: template.data.projectNotes || '',
+      assets: [],
+      aspectRatio: '16:9',
+      viewMode: template.data.viewMode || 'storyboard',
+      lastOpenedAt: Date.now(),
+      updatedAt: Date.now(),
+      createdAt: Date.now(),
+      thumbnailUrl: null,
+      isArchived: false,
+      // Populate mode-specific keys based on template type
+      storyboardNodes: template.data.viewMode === 'storyboard' ? newNodes : [],
+      storyboardEdges: template.data.viewMode === 'storyboard' ? newEdges : [],
+      mindMapNodes: template.data.viewMode === 'mindmap' ? newNodes : [],
+      mindMapEdges: template.data.viewMode === 'mindmap' ? newEdges : [],
+    };
+
+    const initialHistory = { history: [{ nodes: newNodes, edges: newEdges }], index: 0 };
+    setProjects(prev => [newProject, ...prev]);
+    setProjectHistories(prev => ({ ...prev, [id]: initialHistory }));
+
+    setActiveProjectId(id);
+    setShowDashboard(false);
+    setNodes(newNodes);
+    setEdges(newEdges);
+    setProjectName(newProject.name);
+    setAspectRatio('16:9');
+    setProjectNotes(newProject.projectNotes);
+    setAssets([]);
+    setViewMode(newProject.viewMode);
+    setHistory(initialHistory.history);
+    setHistoryIndex(initialHistory.index);
+    setSelectedNodeId(null);
+    setSelectedNodes([]);
+    navigate(`/projects/${id}`);
+  }, [navigate]);
 
   const goToDashboard = useCallback(() => {
     if (activeProjectId) {
@@ -336,7 +393,6 @@ const AppContent = () => {
         if (viewMode === 'storyboard' || viewMode === 'traditional') {
           updates.storyboardNodes = currentNodes;
           updates.storyboardEdges = currentEdges;
-          // Also update legacy fields for backward compatibility if needed, or just rely on specific fields
           updates.nodes = currentNodes;
           updates.edges = currentEdges;
         } else if (viewMode === 'mindmap') {
@@ -418,37 +474,39 @@ const AppContent = () => {
     setProjects(prev => prev.map(p => p.id === id ? { ...p, isArchived: true, updatedAt: Date.now() } : p));
   }, []);
 
-  // Simple client-side routing for dashboard/editor views
+  // Hash-Based Routing Effect (Safe for Blobs/Sandboxes)
   useEffect(() => {
     const applyRoute = () => {
-      if (typeof window === 'undefined') return;
-      const path = window.location.pathname;
+      // Get hash part, remove leading '#'
+      const hash = window.location.hash; // e.g., "#/projects/123"
+      const path = hash.replace(/^#/, '');
+
       if (path.startsWith('/projects/')) {
         const id = path.replace('/projects/', '');
-
-        // Prevent infinite loop if project is already active
         if (activeProjectId === id) return;
-
         if (projects.find(p => p.id === id)) {
           openProject(id, false);
           return;
         }
       }
-      if (path !== '/projects') {
-        navigate('/projects');
-      }
 
-      // Only reset if needed to avoid unnecessary state updates
-      if (!showDashboard || activeProjectId) {
+      // Default to dashboard if no valid project path
+      if ((!path || path === '/' || path === '/projects') && (!showDashboard || activeProjectId)) {
         setShowDashboard(true);
         setActiveProjectId(null);
+        // Clean up URL if we were on a dead project link
+        if (path !== '/' && path !== '/projects') {
+          // Safer than pushState in strict mode, just clear hash
+          window.location.hash = '/projects';
+        }
       }
     };
 
     applyRoute();
-    window.addEventListener('popstate', applyRoute);
-    return () => window.removeEventListener('popstate', applyRoute);
-  }, [projects, openProject, navigate, activeProjectId, showDashboard]);
+    window.addEventListener('hashchange', applyRoute);
+    return () => window.removeEventListener('hashchange', applyRoute);
+  }, [projects, openProject, activeProjectId, showDashboard]);
+
 
   const recordHistory = useCallback((newNodes: Node<StoryNodeData>[], newEdges: Edge[]) => {
     setNodes(newNodes);
@@ -584,7 +642,7 @@ const AppContent = () => {
 
   }, [nodes, edges, recordHistory, handleAddAsset]);
 
-  // -- Global Paste Listener for URLs --
+  // -- Global Paste Listener for URLs and Images --
   useEffect(() => {
     const handlePaste = (e: ClipboardEvent) => {
       // If presentation is open or focusing an input, ignore
@@ -592,18 +650,151 @@ const AppContent = () => {
       const target = e.target as HTMLElement;
       if (target.matches('input, textarea, [contenteditable]')) return;
 
+      const items = e.clipboardData?.items;
+      if (!items) return;
+
+      // 1. Check for File (Binary Image Copy)
+      for (let i = 0; i < items.length; i++) {
+        if (items[i].type.indexOf('image') !== -1) {
+          e.preventDefault();
+          const blob = items[i].getAsFile();
+          if (blob) {
+            const reader = new FileReader();
+            reader.onload = (event) => {
+              const resultUrl = event.target?.result as string;
+
+              const lastNode = nodes[nodes.length - 1];
+              const pos = lastNode ? { x: lastNode.position.x + 50, y: lastNode.position.y + 50 } : { x: 200, y: 200 };
+
+              // Create Node
+              const newNode: Node<StoryNodeData> = {
+                id: generateUUID(),
+                type: 'fusionNode',
+                position: pos,
+                data: {
+                  label: 'Pasted Image',
+                  description: '',
+                  duration: 3,
+                  image: resultUrl,
+                  fileName: `pasted_image_${Date.now()}.png`,
+                  color: NODE_COLORS.Blue,
+                  variant: 'scene',
+                  shotType: 'med',
+                  mediaType: 'image'
+                }
+              };
+
+              const nextNodes = [...nodes, newNode];
+              recordHistory(nextNodes, edges);
+              setSelectedNodeId(newNode.id);
+
+              // Create Asset
+              const newAsset: Asset = {
+                id: generateUUID(),
+                type: 'image',
+                url: resultUrl,
+                name: `Pasted_Image_${Date.now()}.png`,
+                tags: ['pasted'],
+                dateAdded: Date.now()
+              };
+              handleAddAsset(newAsset);
+            };
+            reader.readAsDataURL(blob);
+          }
+          return; // Stop after finding image
+        }
+      }
+
+      // 2. Check for Text (URL)
       const text = e.clipboardData?.getData('text');
       if (text && isValidURL(text.trim())) {
         e.preventDefault();
         const lastNode = nodes[nodes.length - 1];
         const pos = lastNode ? { x: lastNode.position.x + 50, y: lastNode.position.y + 50 } : { x: 200, y: 200 };
-        createLinkNode(text.trim(), pos);
+
+        // Check if embeddable video URL (YouTube, Vimeo)
+        const embedInfo = getEmbedInfo(text.trim());
+        if (embedInfo) {
+          const newNode: Node<StoryNodeData> = {
+            id: generateUUID(),
+            type: 'fusionNode',
+            position: pos,
+            data: {
+              label: `${embedInfo.provider} Video`,
+              description: '',
+              duration: 10,
+              image: embedInfo.url, // The embed URL
+              fileName: `${embedInfo.provider} Video`,
+              color: NODE_COLORS.Red,
+              variant: 'scene',
+              mediaType: 'embed'
+            }
+          };
+          const nextNodes = [...nodes, newNode];
+          recordHistory(nextNodes, edges);
+          setSelectedNodeId(newNode.id);
+
+          // Add asset
+          const newAsset: Asset = {
+            id: generateUUID(),
+            type: 'embed',
+            url: embedInfo.url,
+            name: `${embedInfo.provider} Video`,
+            tags: ['video', 'embed', embedInfo.provider.toLowerCase()],
+            dateAdded: Date.now(),
+            meta: {
+              originalUrl: embedInfo.originalUrl,
+              provider: embedInfo.provider,
+              image: embedInfo.thumbnail
+            }
+          };
+          handleAddAsset(newAsset);
+          return;
+        }
+
+        // Check if image URL
+        if (text.match(/\.(jpeg|jpg|gif|png|webp)$/i)) {
+          // Treat as image node
+          const newNode: Node<StoryNodeData> = {
+            id: generateUUID(),
+            type: 'fusionNode',
+            position: pos,
+            data: {
+              label: 'Linked Image',
+              description: '',
+              duration: 3,
+              image: text.trim(),
+              fileName: text.split('/').pop() || 'image.png',
+              color: NODE_COLORS.Blue,
+              variant: 'scene',
+              shotType: 'med',
+              mediaType: 'image'
+            }
+          };
+          const nextNodes = [...nodes, newNode];
+          recordHistory(nextNodes, edges);
+          setSelectedNodeId(newNode.id);
+
+          // Add asset (External URL)
+          const newAsset: Asset = {
+            id: generateUUID(),
+            type: 'image',
+            url: text.trim(),
+            name: text.split('/').pop() || 'image.png',
+            tags: ['linked'],
+            dateAdded: Date.now()
+          };
+          handleAddAsset(newAsset);
+        } else {
+          // Treat as Link Node (Existing logic)
+          createLinkNode(text.trim(), pos);
+        }
       }
     };
 
     window.addEventListener('paste', handlePaste);
     return () => window.removeEventListener('paste', handlePaste);
-  }, [isPresentationOpen, nodes, createLinkNode]);
+  }, [isPresentationOpen, nodes, edges, createLinkNode, recordHistory, handleAddAsset]);
 
 
   // -- Keyboard Event Listeners for Spacebar --
@@ -640,7 +831,7 @@ const AppContent = () => {
   }, [isPresentationOpen]);
 
   const onNodesChange = useCallback(
-    (changes: NodeChange[]) => setNodes((nds) => applyNodeChanges(changes, nds)),
+    (changes: NodeChange[]) => setNodes((nds) => applyNodeChanges(changes, nds) as Node<StoryNodeData>[]),
     []
   );
 
@@ -652,7 +843,7 @@ const AppContent = () => {
   const onConnect = useCallback(
     (params: Connection) => {
       if (params.source === params.target) return;
-      // Record history for connection
+      // Fusion style: Default is Bezier curve
       const newEdges = addEdge({ ...params, type: 'default', style: { stroke: '#888', strokeWidth: 2 } } as Edge, edges);
       recordHistory(nodes, newEdges);
     },
@@ -812,8 +1003,20 @@ const AppContent = () => {
 
   // --- AUTO LAYOUT LOGIC ---
   const handleAutoLayout = useCallback((type?: string) => {
-    const layoutType = (type as any) || (viewMode === 'mindmap' ? 'mindmap' : 'default');
-    const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(nodes, edges, 'LR', layoutType);
+    let layoutType: any = 'default';
+    let direction = 'LR';
+
+    if (type === 'mindmap') { layoutType = 'mindmap'; direction = 'LR'; }
+    else if (type === 'radial') { layoutType = 'radial'; }
+    else if (type === 'organic') { layoutType = 'organic'; }
+    else if (type === 'tree-tb') { layoutType = 'default'; direction = 'TB'; }
+    else if (type === 'tree-lr') { layoutType = 'default'; direction = 'LR'; }
+    else {
+      // Default behavior based on viewMode
+      layoutType = viewMode === 'mindmap' ? 'mindmap' : 'default';
+    }
+
+    const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(nodes, edges, direction, layoutType);
     recordHistory(layoutedNodes, layoutedEdges);
   }, [nodes, edges, recordHistory, viewMode]);
 
@@ -873,10 +1076,10 @@ const AppContent = () => {
         position: { x: relativeX, y: relativeY },
         selected: false
       };
-    });
+    }) as Node<StoryNodeData>[];
 
     const remainingNodes = nodes.filter(n => !selectedNodes.find(sn => sn.id === n.id));
-    const nextNodes = [...remainingNodes, groupNode, ...updatedSelectedNodes];
+    const nextNodes = [...remainingNodes, groupNode, ...updatedSelectedNodes] as Node<StoryNodeData>[];
 
     recordHistory(nextNodes, edges);
 
@@ -911,10 +1114,10 @@ const AppContent = () => {
           y: groupNode.position.y + child.position.y
         }
       };
-    });
+    }) as Node<StoryNodeData>[];
 
     const others = nodes.filter(n => n.id !== groupNode.id && n.parentId !== groupNode.id);
-    const nextNodes = [...others, ...updatedChildren];
+    const nextNodes = [...others, ...updatedChildren] as Node<StoryNodeData>[];
 
     recordHistory(nextNodes, edges);
 
@@ -940,7 +1143,7 @@ const AppContent = () => {
       selected: true,
     };
 
-    const nextNodes = nodes.map(n => ({ ...n, selected: false })).concat(newNode);
+    const nextNodes = (nodes.map(n => ({ ...n, selected: false })) as Node<StoryNodeData>[]).concat(newNode);
     recordHistory(nextNodes, edges);
     setMenu(null);
   }, [menu, nodes, edges, recordHistory]);
@@ -1146,6 +1349,31 @@ const AppContent = () => {
           return;
         }
 
+        if (assetMediaType === 'embed') {
+          const metaStr = event.dataTransfer.getData('application/reactflow/embedMeta');
+          const meta = metaStr ? JSON.parse(metaStr) : {};
+
+          const newNode: Node<StoryNodeData> = {
+            id: generateUUID(),
+            type: 'fusionNode',
+            position,
+            data: {
+              label: `${meta.provider || 'Video'} Embed`,
+              description: '',
+              duration: 10,
+              image: assetSource, // embed url
+              fileName: 'embed',
+              color: NODE_COLORS.Red,
+              variant: 'scene',
+              mediaType: 'embed'
+            }
+          };
+          const nextNodes = [...nodes, newNode];
+          recordHistory(nextNodes, edges);
+          setSelectedNodeId(newNode.id);
+          return;
+        }
+
         const newNode: Node<StoryNodeData> = {
           id: generateUUID(),
           type: 'fusionNode',
@@ -1171,6 +1399,46 @@ const AppContent = () => {
       const textData = event.dataTransfer.getData('text/plain');
       if (textData && isValidURL(textData)) {
         const position = screenToFlowPosition({ x: event.clientX, y: event.clientY });
+
+        // Check if embed
+        const embedInfo = getEmbedInfo(textData);
+        if (embedInfo) {
+          const newNode: Node<StoryNodeData> = {
+            id: generateUUID(),
+            type: 'fusionNode',
+            position,
+            data: {
+              label: `${embedInfo.provider} Video`,
+              description: '',
+              duration: 10,
+              image: embedInfo.url,
+              fileName: 'embed',
+              color: NODE_COLORS.Red,
+              variant: 'scene',
+              mediaType: 'embed'
+            }
+          };
+          const nextNodes = [...nodes, newNode];
+          recordHistory(nextNodes, edges);
+          setSelectedNodeId(newNode.id);
+
+          const newAsset: Asset = {
+            id: generateUUID(),
+            type: 'embed',
+            url: embedInfo.url,
+            name: `${embedInfo.provider} Video`,
+            tags: ['video', 'embed', embedInfo.provider.toLowerCase()],
+            dateAdded: Date.now(),
+            meta: {
+              originalUrl: embedInfo.originalUrl,
+              provider: embedInfo.provider,
+              image: embedInfo.thumbnail
+            }
+          };
+          setAssets(prev => [newAsset, ...prev]);
+          return;
+        }
+
         createLinkNode(textData, position);
         return;
       }
@@ -1244,8 +1512,10 @@ const AppContent = () => {
       <SettingsContext.Provider value={settingsValue}>
         <Dashboard
           projects={projects}
+          templates={TEMPLATES}
           onOpenProject={openProject}
           onCreateProject={handleCreateProject}
+          onCreateFromTemplate={handleCreateFromTemplate}
           onRenameProject={renameProject}
           onDuplicateProject={duplicateProject}
           onDeleteProject={deleteProject}
@@ -1261,8 +1531,10 @@ const AppContent = () => {
       <SettingsContext.Provider value={settingsValue}>
         <Dashboard
           projects={projects}
+          templates={TEMPLATES}
           onOpenProject={openProject}
           onCreateProject={handleCreateProject}
+          onCreateFromTemplate={handleCreateFromTemplate}
           onRenameProject={renameProject}
           onDuplicateProject={duplicateProject}
           onDeleteProject={deleteProject}
@@ -1336,9 +1608,10 @@ const AppContent = () => {
                     onNodeDragStop={onNodeDragStop}
                     nodeTypes={nodeTypes}
                     defaultEdgeOptions={{
-                      type: 'default',
+                      type: 'default', // Ensures default Bezier
                       style: { stroke: '#888', strokeWidth: 2 }
                     }}
+                    connectionLineType={ConnectionLineType.Bezier} // Fusion-style drawing line
                     fitView
                     snapToGrid={true}
                     snapGrid={[15, 15]}
@@ -1356,7 +1629,9 @@ const AppContent = () => {
                       gap={20}
                       size={1}
                     />
-                    <Controls className="!bg-[#262626] !border-[#3d3d3d] [&>button]:!fill-gray-400 [&>button]:!border-b-[#3d3d3d] hover:[&>button]:!bg-[#3d3d3d] hover:[&>button]:!fill-white" />
+                    <Controls
+                      className="!bg-[#262626] !border !border-[#3d3d3d] !shadow-lg !rounded-lg [&>button]:!bg-[#262626] [&>button]:!border-b-[#3d3d3d] [&>button]:!text-gray-400 hover:[&>button]:!text-white hover:[&>button]:!bg-[#3d3d3d] [&_svg]:!fill-current [&_path]:!fill-current [&>button:last-child]:!border-b-0"
+                    />
                     <MiniMap
                       nodeColor={(n) => (n.data.color as string) || '#3d3d3d'}
                       maskColor="#181818"
@@ -1383,7 +1658,7 @@ const AppContent = () => {
                 <div className="absolute top-4 left-4 bg-[#262626]/80 p-2 rounded text-xs text-gray-400 pointer-events-none border border-[#3d3d3d] z-50">
                   <p>Pre-Production Fusion v1.9</p>
                   <p className="text-[10px] mt-1 text-davinci-accent opacity-70">
-                    {isSpacePressed ? '[HAND TOOL ACTIVE]' : 'Paste URL • Drag into Groups • Ctrl+Z Undo'}
+                    {isSpacePressed ? '[HAND TOOL ACTIVE]' : 'Paste Image/URL • Drag into Groups • Ctrl+Z Undo'}
                   </p>
                 </div>
               </div>
@@ -1417,8 +1692,6 @@ const AppContent = () => {
     </SettingsContext.Provider>
   );
 };
-
-import MobileWarning from './components/MobileWarning';
 
 export default function App() {
   return (
