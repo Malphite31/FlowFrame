@@ -1,0 +1,5 @@
+{
+  "name": "FlowFrame",
+  "description": "A node-based pre-production storyboard editor designed for DaVinci Resolve and Premiere Pro workflows. Features XML, EDL, and JSON export with a Fusion-inspired interface.",
+  "requestFramePermissions": []
+}
