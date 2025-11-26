@@ -172,14 +172,33 @@ export const TopBar: React.FC<TopBarProps> = ({
 
           {/* Layout Presets */}
           <div className="flex items-center gap-1 bg-[#262626] rounded-lg p-1 border border-[#3d3d3d] mr-2">
-            <button onClick={() => onLayout('TB')} className="px-2 py-1.5 text-[10px] font-medium text-gray-400 hover:text-white hover:bg-[#3d3d3d] rounded transition-colors">
-              Tree
+            <button
+              onClick={() => onLayout('radial')}
+              className="px-2 py-1.5 text-[10px] font-medium text-gray-400 hover:text-white hover:bg-[#3d3d3d] rounded transition-colors"
+              title="Para sa brainstorming; gitna papunta sa labas."
+            >
+              Radial Map
             </button>
-            <button onClick={() => onLayout('LR')} className="px-2 py-1.5 text-[10px] font-medium text-gray-400 hover:text-white hover:bg-[#3d3d3d] rounded transition-colors">
-              Mind Map
+            <button
+              onClick={() => onLayout('tree-tb')}
+              className="px-2 py-1.5 text-[10px] font-medium text-gray-400 hover:text-white hover:bg-[#3d3d3d] rounded transition-colors"
+              title="Para sa structure; taas pababa."
+            >
+              Tree Layout (Hierarchical)
             </button>
-            <button onClick={() => onLayout('TB')} className="px-2 py-1.5 text-[10px] font-medium text-gray-400 hover:text-white hover:bg-[#3d3d3d] rounded transition-colors">
-              Storyboard
+            <button
+              onClick={() => onLayout('tree-lr')}
+              className="px-2 py-1.5 text-[10px] font-medium text-gray-400 hover:text-white hover:bg-[#3d3d3d] rounded transition-colors"
+              title="Para sa sunod-sunod na proseso."
+            >
+              Logic Chart (Left-to-Right)
+            </button>
+            <button
+              onClick={() => onLayout('organic')}
+              className="px-2 py-1.5 text-[10px] font-medium text-gray-400 hover:text-white hover:bg-[#3d3d3d] rounded transition-colors"
+              title="Para sa network ng koneksyon at ugnayan."
+            >
+              Concept Map
             </button>
           </div>
 
