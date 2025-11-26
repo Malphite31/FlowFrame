@@ -204,7 +204,12 @@ const AppContent = () => {
   // Persist projects whenever they change
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(projects));
+      try {
+        localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(projects));
+      } catch (error) {
+        console.error('Failed to save projects to local storage:', error);
+        // Optional: User notification logic here
+      }
     }
   }, [projects]);
 

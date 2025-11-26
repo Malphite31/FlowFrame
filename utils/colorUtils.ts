@@ -5,6 +5,12 @@ export interface HSL {
   l: number;
 }
 
+const clamp = (val: number, min: number, max: number) => Math.min(max, Math.max(min, val));
+const normalizeHue = (h: number) => {
+    let n = h % 360;
+    return n < 0 ? n + 360 : n;
+};
+
 export function hexToHSL(hex: string): HSL {
   let result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
   if (!result) return { h: 0, s: 0, l: 0 };
@@ -29,53 +35,107 @@ export function hexToHSL(hex: string): HSL {
 }
 
 export function hslToHex(h: number, s: number, l: number): string {
-  l /= 100;
-  const a = s * Math.min(l, 1 - l) / 100;
+  h = normalizeHue(h);
+  s = clamp(s, 0, 100);
+  l = clamp(l, 0, 100);
+  
+  const sat = s / 100;
+  const lit = l / 100;
+  
+  const a = sat * Math.min(lit, 1 - lit);
   const f = (n: number) => {
     const k = (n + h / 30) % 12;
-    const color = l - a * Math.max(Math.min(k - 3, 9 - k, 1), -1);
+    const color = lit - a * Math.max(Math.min(k - 3, 9 - k, 1), -1);
     return Math.round(255 * color).toString(16).padStart(2, '0');
   };
   return `#${f(0)}${f(8)}${f(4)}`;
 }
 
 // Harmony Generators
-export const generateTints = (h: number, s: number, l: number, steps = 5): string[] => {
+export const generateTints = (h: number, s: number, l: number, steps = 7): string[] => {
   const tints = [];
-  const stepSize = (100 - l) / (steps + 1);
+  // Tints: lighten towards 100%
+  // We want 'steps' swatches ranging from slightly lighter than base to very light.
+  // If we want exactly 7 swatches, we can split the remaining lightness range.
   for (let i = 1; i <= steps; i++) {
-    tints.push(hslToHex(h, s, Math.min(100, l + stepSize * i)));
+    // L + (remaining * (i / (steps + 1)))
+    // Ensures we don't hit pure 100 unless we want to.
+    const delta = (100 - l) * (i / (steps + 1));
+    tints.push(hslToHex(h, s, l + delta));
   }
   return tints;
 };
 
-export const generateShades = (h: number, s: number, l: number, steps = 5): string[] => {
+export const generateShades = (h: number, s: number, l: number, steps = 7): string[] => {
   const shades = [];
-  const stepSize = l / (steps + 1);
+  // Shades: darken towards 0%
   for (let i = 1; i <= steps; i++) {
-    shades.push(hslToHex(h, s, Math.max(0, l - stepSize * i)));
+    // L - (L * (i / (steps + 1)))
+    const delta = l * (i / (steps + 1));
+    shades.push(hslToHex(h, s, l - delta));
   }
   return shades;
 };
 
-export const generateTones = (h: number, s: number, l: number, steps = 5): string[] => {
+export const generateTones = (h: number, s: number, l: number, steps = 7): string[] => {
   const tones = [];
-  const stepSize = s / (steps + 1);
+  // Tones: desaturate towards 0%
   for (let i = 1; i <= steps; i++) {
-    tones.push(hslToHex(h, Math.max(0, s - stepSize * i), l));
+    const delta = s * (i / (steps + 1));
+    tones.push(hslToHex(h, s - delta, l));
   }
   return tones;
 };
 
 export const generateHarmonies = (h: number, s: number, l: number) => {
-  const normalize = (deg: number) => (deg < 0 ? deg + 360 : deg % 360);
-  
+  const hex = (d: number, sa: number, li: number) => hslToHex(d, sa, li);
+
   return {
-    complementary: [hslToHex(normalize(h + 180), s, l)],
-    splitComplementary: [hslToHex(normalize(h + 150), s, l), hslToHex(normalize(h + 210), s, l)],
-    analogous: [hslToHex(normalize(h - 30), s, l), hslToHex(normalize(h + 30), s, l)],
-    triadic: [hslToHex(normalize(h + 120), s, l), hslToHex(normalize(h + 240), s, l)],
-    tetradic: [hslToHex(normalize(h + 90), s, l), hslToHex(normalize(h + 180), s, l), hslToHex(normalize(h + 270), s, l)],
-    square: [hslToHex(normalize(h + 90), s, l), hslToHex(normalize(h + 180), s, l), hslToHex(normalize(h + 270), s, l)],
+    complementary: [
+        hex(h + 180, s, l),
+        hex(h, s, l) // Included base for context or swap order if needed, 
+        // Actually Affinity typically shows the complementary color. 
+        // Request said "Complementary (2)". Usually Base + Comp.
+        // Let's provide Comp + Base or Base + Comp. 
+        // If strict Affinity: It usually shows the complementary relationship.
+        // We'll return [Base, Comp] or similar.
+        // Prompt said: "Complementary (2): H + 180" -> wait, just 1 color?
+        // Prompt list: "Complementary (2 swatches)".
+        // So Base + Comp.
+    ],
+    splitComplementary: [
+        hex(h - 150, s, l),
+        hex(h, s, l),
+        hex(h + 150, s, l)
+    ],
+    analogous: [
+        hex(h - 30, s, l),
+        hex(h, s, l),
+        hex(h + 30, s, l)
+    ],
+    accentedAnalogic: [
+        hex(h - 30, s, l),
+        hex(h + 30, s, l),
+        hex(h + 180, s, l),
+        hex(h + 180 - 30, s, l),
+        hex(h + 180 + 30, s, l)
+    ],
+    triadic: [
+        hex(h, s, l),
+        hex(h + 120, s, l),
+        hex(h + 240, s, l)
+    ],
+    tetradic: [
+        hex(h, s, l),
+        hex(h + 90, s, l),
+        hex(h + 180, s, l),
+        hex(h + 270, s, l)
+    ],
+    square: [
+        hex(h, 80, l), // Normalized saturation ~80% per prompt
+        hex(h + 90, 80, l),
+        hex(h + 180, 80, l),
+        hex(h + 270, 80, l)
+    ],
   };
 };

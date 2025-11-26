@@ -43,37 +43,84 @@ export const LibraryPanel: React.FC<LibraryPanelProps> = ({
   const [isAddingLink, setIsAddingLink] = useState(false);
 
   // -- Color Studio State --
-  const [colorState, setColorState] = useState({ h: 237, s: 100, l: 50 });
+  const [colorState, setColorState] = useState({ h: 237, s: 100, l: 50, a: 100 });
   const [hexInput, setHexInput] = useState('#5e9aff');
   const [savedColors, setSavedColors] = useState<string[]>(Object.values(NODE_COLORS));
+  const [recentColors, setRecentColors] = useState<string[]>([]);
   
   const slPickerRef = useRef<HTMLDivElement>(null);
   const huePickerRef = useRef<HTMLDivElement>(null);
   const [isDraggingSL, setIsDraggingSL] = useState(false);
   const [isDraggingHue, setIsDraggingHue] = useState(false);
+  const lastAppliedColorRef = useRef<string>('');
+  const prevColorState = useRef(colorState);
 
-  // Sync Hex input when internal color state changes
+  // Sync Hex input and Apply Color
   useEffect(() => {
-    const newHex = hslToHex(colorState.h, colorState.s, colorState.l);
-    setHexInput(newHex);
-  }, [colorState]);
+    // Only sync if colorState actually changed (dragging picker)
+    const hasChanged = 
+        colorState.h !== prevColorState.current.h || 
+        colorState.s !== prevColorState.current.s || 
+        colorState.l !== prevColorState.current.l;
+
+    if (hasChanged) {
+        const newHex = hslToHex(colorState.h, colorState.s, colorState.l);
+        setHexInput(newHex);
+        
+        // Prevent infinite loop: only apply if color strictly changed
+        if (newHex !== lastAppliedColorRef.current) {
+            onApplyColor(newHex); 
+            lastAppliedColorRef.current = newHex;
+        }
+        prevColorState.current = colorState;
+    }
+  }, [colorState, onApplyColor]);
 
   // Derived Harmonies
   const harmonies = useMemo(() => {
     return generateHarmonies(colorState.h, colorState.s, colorState.l);
-  }, [colorState]);
+  }, [colorState.h, colorState.s, colorState.l]);
 
   const tints = useMemo(() => generateTints(colorState.h, colorState.s, colorState.l), [colorState]);
   const shades = useMemo(() => generateShades(colorState.h, colorState.s, colorState.l), [colorState]);
   const tones = useMemo(() => generateTones(colorState.h, colorState.s, colorState.l), [colorState]);
+
+  const addToRecent = (color: string) => {
+      setRecentColors(prev => {
+          const newRecent = [color, ...prev.filter(c => c !== color)].slice(0, 10);
+          return newRecent;
+      });
+  };
+
+  const handleColorClick = (color: string) => {
+      onApplyColor(color);
+      setHexInput(color); // Update input so it can be saved/seen
+      addToRecent(color);
+  };
 
   // Handlers for Color Studio
   const handleHexChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value;
     setHexInput(val);
     if (/^#[0-9A-F]{6}$/i.test(val)) {
-      setColorState(hexToHSL(val));
+      const hsl = hexToHSL(val);
+      // Manually sync refs to prevent loop/reversion
+      lastAppliedColorRef.current = val; 
+      setColorState(prev => {
+          const next = { ...prev, h: hsl.h, s: hsl.s, l: hsl.l };
+          prevColorState.current = next; // Update prev ref so effect doesn't double-fire
+          return next;
+      });
+      onApplyColor(val);
     }
+  };
+
+  const handleHSLChange = (key: 'h'|'s'|'l', val: string) => {
+      let num = parseInt(val);
+      if (isNaN(num)) num = 0;
+      if (key === 'h') num = Math.max(0, Math.min(360, num));
+      else num = Math.max(0, Math.min(100, num));
+      setColorState(prev => ({ ...prev, [key]: num }));
   };
 
   // --- SL Picker Logic ---
@@ -207,6 +254,16 @@ export const LibraryPanel: React.FC<LibraryPanelProps> = ({
     }
   };
 
+  const handleDownloadAsset = (e: React.MouseEvent, asset: Asset) => {
+    e.stopPropagation();
+    const link = document.createElement('a');
+    link.href = asset.url;
+    link.download = asset.name;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   const handleAssetDragStart = (event: React.DragEvent, asset: Asset) => {
     event.dataTransfer.setData('application/reactflow/type', 'asset');
     event.dataTransfer.setData('application/reactflow/id', asset.id);
@@ -237,20 +294,10 @@ export const LibraryPanel: React.FC<LibraryPanelProps> = ({
      }
   };
 
-  const handleColorClick = (color: string) => {
-      onApplyColor(color);
-      setColorState(hexToHSL(color));
-  };
-
   const saveCurrentColor = () => {
      if(!savedColors.includes(hexInput)) {
          setSavedColors([...savedColors, hexInput]);
      }
-  };
-
-  // Apply a harmony color to selected nodes without mutating the base picker state
-  const handleHarmonyApply = (color: string) => {
-      onApplyColor(color);
   };
 
   const handleExportPalette = () => {
@@ -327,27 +374,29 @@ export const LibraryPanel: React.FC<LibraryPanelProps> = ({
   };
 
   // Helper for rendering harmony swatches
-  const renderSwatches = (colors: string[], label: string) => (
-    <div className="flex flex-col gap-1">
-      <span className="text-[10px] text-gray-400 font-medium uppercase tracking-tight">{label}</span>
-      <div className="flex gap-1">
-        {colors.map(c => (
-           <div 
-             key={c} 
-             onClick={() => handleHarmonyApply(c)} 
-             className="h-6 flex-1 rounded-sm cursor-pointer border border-black/20 hover:scale-105 hover:z-10 transition-transform relative group" 
-             style={{ background: c }} 
-             title={`${label}: ${c.toUpperCase()} (click to apply without changing picker)`}
-           >
-             <div className="absolute inset-0 opacity-0 group-hover:opacity-100 bg-black/20 flex items-center justify-center">
-                <div className="w-1 h-1 bg-white rounded-full"></div>
+  const renderSwatches = (colors: string[], label: string) => {
+    const safeColors = colors && colors.length > 0 ? colors : ['#000'];
+    return (
+      <div className="flex flex-col gap-1 mb-1">
+        <span className="text-[10px] text-gray-400 font-medium uppercase tracking-tight">{label}</span>
+        <div className="grid grid-flow-col auto-cols-fr gap-1">
+          {safeColors.map((c, i) => (
+             <div 
+               key={`${label}-${i}-${c}`} 
+               onClick={() => handleColorClick(c)} 
+               className="h-5 rounded-[3px] cursor-pointer border border-black/20 hover:scale-105 hover:z-10 hover:border-white transition-all relative group shadow-sm" 
+               style={{ backgroundColor: c }} 
+               title={`${label}: ${c.toUpperCase()}`}
+             >
+               <div className="absolute inset-0 opacity-0 group-hover:opacity-100 bg-black/10 flex items-center justify-center rounded-[3px]">
+                  <div className="w-1 h-1 bg-white rounded-full shadow-sm"></div>
+               </div>
              </div>
-             <span className="absolute bottom-0 right-0 text-[8px] text-white/70 px-1 bg-black/40 rounded-tl hidden group-hover:inline">Apply</span>
-           </div>
-        ))}
+          ))}
+        </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   return (
     <div className="w-80 bg-[#262626] border-r border-black flex flex-col h-full flex-shrink-0 z-20">
@@ -507,6 +556,15 @@ export const LibraryPanel: React.FC<LibraryPanelProps> = ({
                                             </a>
                                          </>
                                       )}
+                                      {asset.type !== 'link' && (
+                                          <button 
+                                              onClick={(e) => handleDownloadAsset(e, asset)}
+                                              className="absolute top-1 right-1 p-1 bg-black/60 hover:bg-davinci-accent hover:text-black text-white rounded opacity-0 group-hover:opacity-100 transition-opacity z-10"
+                                              title="Download"
+                                          >
+                                              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+                                          </button>
+                                      )}
                                       <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-end p-2 pointer-events-none">
                                           <span className="text-[9px] text-white font-bold truncate w-full">{asset.name}</span>
                                       </div>
@@ -588,13 +646,12 @@ export const LibraryPanel: React.FC<LibraryPanelProps> = ({
 
           {/* COLORS TAB - COLOR STUDIO */}
           {activeTab === 'colors' && (
-              <div className="flex flex-col gap-4 pb-10">
-                  
-                  {/* 1. Color Picker Area */}
-                  <div className="flex flex-col gap-3 p-3 bg-[#1a1a1a] rounded border border-[#3d3d3d]">
-                      
-                      {/* Sat/Light Box & Hue Slider Row */}
-                      <div className="flex gap-3 h-32">
+              <div className="flex h-full gap-2 pb-4 overflow-hidden">
+                  {/* LEFT: Main Picker Area */}
+                  <div className="flex-1 flex flex-col gap-3 min-w-0 overflow-hidden">
+                    
+                    {/* 1. Rectangular Gradient Picker + Hue Slider */}
+                    <div className="flex gap-3 h-32 flex-shrink-0">
                          {/* Saturation/Lightness Picker */}
                          <div 
                            className="flex-1 relative cursor-crosshair rounded overflow-hidden border border-[#333]"
@@ -617,7 +674,7 @@ export const LibraryPanel: React.FC<LibraryPanelProps> = ({
                             />
                          </div>
 
-                         {/* Vertical Hue Slider (Custom) */}
+                         {/* Vertical Hue Slider */}
                          <div 
                            className="w-6 relative rounded-full overflow-hidden border border-[#333] cursor-pointer"
                            ref={huePickerRef}
@@ -631,113 +688,124 @@ export const LibraryPanel: React.FC<LibraryPanelProps> = ({
                                 style={{ top: `${(colorState.h / 360) * 100}%` }}
                              ></div>
                          </div>
-                      </div>
+                    </div>
+                    
+                    {/* 2. Opacity Bar */}
+                    <div className="flex items-center gap-2 px-1 flex-shrink-0">
+                        <span className="text-[9px] text-gray-500 font-mono w-4">OP</span>
+                        <div className="flex-1 h-3 rounded overflow-hidden relative border border-[#3d3d3d]">
+                            {/* Checkerboard */}
+                            <div className="absolute inset-0 opacity-30" style={{ backgroundImage: 'linear-gradient(45deg, #ccc 25%, transparent 25%), linear-gradient(-45deg, #ccc 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #ccc 75%), linear-gradient(-45deg, transparent 75%, #ccc 75%)', backgroundSize: '6px 6px', backgroundPosition: '0 0, 0 3px, 3px -3px, -3px 0px' }}></div>
+                            {/* Color Bar */}
+                            <div className="absolute inset-0" style={{ background: `linear-gradient(to right, transparent, ${hslToHex(colorState.h, colorState.s, colorState.l)})` }}></div>
+                            {/* Slider */}
+                            <input 
+                                type="range" min="0" max="100" step="1" 
+                                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                                value={colorState.a}
+                                onChange={(e) => setColorState(prev => ({ ...prev, a: parseInt(e.target.value) }))}
+                            />
+                            {/* Handle Visual */}
+                            <div className="absolute top-0 bottom-0 w-1 bg-white shadow border-x border-black pointer-events-none" style={{ left: `${colorState.a}%` }}></div>
+                        </div>
+                        <span className="text-[9px] text-gray-400 w-6 text-right">{colorState.a}%</span>
+                    </div>
 
-                      {/* Controls Row */}
-                      <div className="flex gap-2 items-center">
-                          <div 
-                             className="w-8 h-8 rounded border border-[#3d3d3d] shadow-inner" 
-                             style={{ backgroundColor: hexInput }}
-                          />
-                          <div className="flex-1 relative">
-                             <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-500 text-[10px]">#</span>
+                    {/* 3. Inputs */}
+                    <div className="flex gap-1 items-center px-1 flex-shrink-0">
+                         <div className="flex-1 relative">
+                             <span className="absolute left-1.5 top-1/2 -translate-y-1/2 text-gray-500 text-[10px] pointer-events-none">#</span>
                              <input 
                                 type="text" 
                                 value={hexInput.replace('#', '')}
                                 onChange={e => handleHexChange({ target: { value: '#' + e.target.value } } as any)}
-                                className="w-full bg-[#121212] border border-[#3d3d3d] rounded py-1 pl-4 pr-2 text-xs text-white font-mono uppercase focus:border-davinci-accent outline-none"
+                                className="w-full bg-[#121212] border border-[#3d3d3d] rounded py-1.5 pl-4 pr-1 text-[12px] text-white font-mono uppercase focus:border-davinci-accent outline-none"
                              />
                           </div>
-                          <div className="flex flex-col gap-0.5 text-[9px] text-gray-500 font-mono w-16 text-right">
-                              <span>H: {colorState.h}°</span>
-                              <span>S: {colorState.s}%</span>
-                              <span>L: {colorState.l}%</span>
-                          </div>
-                      </div>
-                  </div>
+                          {['h','s','l'].map((k) => (
+                              <div key={k} className="flex items-center bg-[#121212] border border-[#3d3d3d] rounded overflow-hidden w-12">
+                                  <span className="text-[9px] text-gray-500 pl-1 uppercase border-r border-[#333] pr-1">{k}</span>
+                                  <input 
+                                      type="number"
+                                      className="w-full bg-transparent text-[12px] text-white text-center outline-none py-1.5 appearance-none"
+                                      value={colorState[k as keyof typeof colorState]}
+                                      onChange={(e) => handleHSLChange(k as any, e.target.value)}
+                                  />
+                              </div>
+                          ))}
+                    </div>
 
-                  {/* 2. Generated Harmonies Grid */}
-                  <div className="flex flex-col gap-4">
-                      
-                      <div className="grid grid-cols-3 gap-2">
-                        <div className="col-span-1">
-                             {renderSwatches(tints, "Tints")}
-                        </div>
-                        <div className="col-span-1">
-                             {renderSwatches(tones, "Tones")}
-                        </div>
-                        <div className="col-span-1">
-                             {renderSwatches(shades, "Shades")}
-                        </div>
-                      </div>
+                    {/* 4. Affinity-style Harmonies (2 Columns) */}
+                    <div className="flex-1 overflow-y-auto pr-1 custom-scrollbar flex gap-3">
+                         {/* LEFT COLUMN */}
+                         <div className="flex-1 flex flex-col gap-2">
+                            {renderSwatches(tints, "Tints")}
+                            {renderSwatches(tones, "Tones")}
+                            {renderSwatches(harmonies.analogous, "Analogous")}
+                            {renderSwatches(harmonies.triadic, "Triadic")}
+                            {renderSwatches(harmonies.tetradic, "Tetradic")}
+                         </div>
 
-                      {/* Harmony List */}
-                      <div className="flex flex-col gap-3 bg-[#1a1a1a] p-3 rounded border border-[#3d3d3d]">
-                          <div className="flex justify-between items-center pb-2 border-b border-[#3d3d3d]">
-                             <span className="text-[10px] text-gray-400 font-bold uppercase">Color Harmonies</span>
-                             <div className="w-2 h-2 rounded-full" style={{ backgroundColor: hexInput }}></div>
-                          </div>
-                          
-                          {/* Grid Layout for Harmonies */}
-                          <div className="grid grid-cols-2 gap-x-4 gap-y-3">
-                              {renderSwatches(harmonies.complementary, "Complementary")}
-                              {renderSwatches(harmonies.analogous, "Analogous")}
-                              {renderSwatches(harmonies.splitComplementary, "Split Comp")}
-                              {renderSwatches(harmonies.triadic, "Triadic")}
-                              {renderSwatches(harmonies.tetradic, "Tetradic")}
-                              {renderSwatches(harmonies.square, "Square")}
-                          </div>
-                      </div>
-                  </div>
-                  
-                  {/* 3. Project Palette (Saved) */}
-                  <div className="border-t border-[#3d3d3d] pt-4">
-                      <div className="flex justify-between items-center mb-2">
-                          <h3 className="text-[10px] text-gray-500 font-bold uppercase">Saved Palette</h3>
-                          <div className="flex gap-2">
-                              {savedColors.length > 0 && (
-                                  <button 
-                                      onClick={handleExportPalette}
-                                      className="text-[10px] bg-davinci-accent/20 text-davinci-accent hover:bg-davinci-accent/40 px-2 py-0.5 rounded transition-colors"
-                                  >
-                                      Export as Asset
-                                  </button>
-                              )}
-                              <button 
-                                 onClick={saveCurrentColor}
-                                 className="text-[10px] bg-[#333] hover:bg-[#444] px-2 py-0.5 rounded text-white transition-colors flex items-center gap-1"
-                              >
-                                 <span>+ Save</span>
-                                 <div className="w-2 h-2 rounded-full" style={{ backgroundColor: hexInput }}></div>
-                              </button>
-                          </div>
-                      </div>
-                      <div className="grid grid-cols-6 gap-2">
-                        {savedColors.map((color, idx) => (
-                            <button
-                                key={`${color}-${idx}`}
-                                onClick={() => handleColorClick(color)}
-                                className="aspect-square rounded border border-black transition-all hover:scale-110 relative group shadow-sm"
-                                style={{ backgroundColor: color }}
-                                title={color}
-                            >
-                                <div 
-                                    onClick={(e) => { e.stopPropagation(); setSavedColors(savedColors.filter((_, i) => i !== idx)); }}
-                                    className="absolute -top-1.5 -right-1.5 w-3.5 h-3.5 bg-red-500 rounded-full text-white flex items-center justify-center opacity-0 group-hover:opacity-100 hover:bg-red-600 shadow-md text-[10px] leading-none"
+                         {/* RIGHT COLUMN */}
+                         <div className="flex-1 flex flex-col gap-2">
+                            {renderSwatches(shades, "Shades")}
+                            {renderSwatches(harmonies.complementary, "Complementary")}
+                            {renderSwatches(harmonies.splitComplementary, "Split Comp")}
+                            {renderSwatches(harmonies.accentedAnalogic, "Accented Analogic")}
+                            {renderSwatches(harmonies.square, "Square")}
+                         </div>
+                    </div>
+                    
+                    {/* Saved */}
+                     <div className="border-t border-[#3d3d3d] pt-2 flex-shrink-0">
+                        <div className="flex justify-between mb-1 items-center">
+                            <span className="text-[9px] font-bold text-gray-500 uppercase">Saved Palette</span>
+                             <div className="flex gap-1">
+                                <button 
+                                    onClick={handleExportPalette}
+                                    className="text-[9px] bg-davinci-accent/10 text-davinci-accent hover:bg-davinci-accent/20 px-2 py-0.5 rounded transition-colors"
                                 >
-                                    &times;
+                                    Export
+                                </button>
+                                <button onClick={saveCurrentColor} className="text-[9px] bg-[#333] text-white hover:bg-[#444] px-2 py-0.5 rounded">+ Save</button>
+                             </div>
+                        </div>
+                        <div className="flex flex-wrap gap-1.5 max-h-40 overflow-y-auto">
+                            {savedColors.map((c, i) => (
+                                <div 
+                                    key={i} 
+                                    onClick={() => handleColorClick(c)} 
+                                    className="w-6 h-6 rounded-md bg-gray-800 border border-black/40 cursor-pointer hover:scale-110 hover:shadow-lg hover:border-white transition-all relative group" 
+                                    style={{ background: c }}
+                                    title={c}
+                                >
+                                     <button 
+                                        onClick={(e) => { e.stopPropagation(); setSavedColors(savedColors.filter((_, idx) => idx !== i)); }}
+                                        className="absolute -top-1 -right-1 w-3 h-3 bg-red-500 rounded-full text-[8px] text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                                     >
+                                         &times;
+                                     </button>
                                 </div>
-                            </button>
-                        ))}
-                      </div>
+                            ))}
+                        </div>
+                    </div>
+
                   </div>
-                  
-                  <div className="p-2 bg-[#1a1a1a] rounded border border-[#3d3d3d] flex items-center gap-2">
-                      <svg className="w-4 h-4 text-davinci-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                      <p className="text-[9px] text-gray-500 leading-tight">
-                          Select a node on the canvas to apply active color.
-                      </p>
+
+                  {/* RIGHT: Recent Colors Strip */}
+                  <div className="w-5 flex flex-col gap-1 border-l border-[#333] pl-1 items-center flex-shrink-0 pt-4">
+                       <span className="text-[8px] text-gray-500 -rotate-90 whitespace-nowrap mb-2">RECENT</span>
+                       {recentColors.map((c, i) => (
+                           <div 
+                             key={`recent-${i}`} 
+                             className="w-3 h-3 rounded-full border border-gray-700 cursor-pointer hover:scale-125 transition-transform"
+                             style={{ background: c }}
+                             onClick={() => handleColorClick(c)}
+                             title={c}
+                           />
+                       ))}
                   </div>
+
               </div>
           )}
        </div>
