@@ -118,6 +118,24 @@ export const TopBar: React.FC<TopBarProps> = ({
             <option value="4:3">4:3</option>
             <option value="21:9">21:9</option>
           </select>
+
+          <div className="h-6 w-px bg-[#3d3d3d] mx-2" />
+
+          {/* Add Node Buttons */}
+          <div className="flex items-center gap-1 bg-[#262626] rounded-lg p-1 border border-[#3d3d3d]">
+            <button onClick={() => onAddNode('text')} className="flex items-center gap-1.5 px-2 py-1.5 text-xs font-medium text-gray-400 hover:text-white hover:bg-[#3d3d3d] rounded transition-colors" title="Add Scene Card">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18" /><line x1="7" y1="2" x2="7" y2="22" /><line x1="17" y1="2" x2="17" y2="22" /><line x1="2" y1="12" x2="22" y2="12" /><line x1="2" y1="7" x2="7" y2="7" /><line x1="2" y1="17" x2="7" y2="17" /><line x1="17" y1="17" x2="22" y2="17" /><line x1="17" y1="7" x2="22" y2="7" /></svg>
+              Scene
+            </button>
+            <button onClick={() => onAddNode('text')} className="flex items-center gap-1.5 px-2 py-1.5 text-xs font-medium text-gray-400 hover:text-white hover:bg-[#3d3d3d] rounded transition-colors" title="Add Mind Map Node">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3" /><path d="M12 15v6" /><path d="M12 9V3" /><path d="M15 12h6" /><path d="M9 12H3" /><path d="M14.5 14.5L19 19" /><path d="M9.5 9.5L5 5" /><path d="M14.5 9.5L19 5" /><path d="M9.5 14.5L5 19" /></svg>
+              Mind Map
+            </button>
+            <button onClick={() => onAddNode('image')} className="flex items-center gap-1.5 px-2 py-1.5 text-xs font-medium text-gray-400 hover:text-white hover:bg-[#3d3d3d] rounded transition-colors" title="Add Mood Image">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2" /><circle cx="8.5" cy="8.5" r="1.5" /><polyline points="21 15 16 10 5 21" /></svg>
+              Mood
+            </button>
+          </div>
         </div>
 
         <div className="flex items-center gap-2">
@@ -152,13 +170,16 @@ export const TopBar: React.FC<TopBarProps> = ({
 
           <div className="h-6 w-px bg-[#3d3d3d] mx-2" />
 
-          {/* Auto Layout Controls */}
-          <div className="flex items-center gap-2 mr-2">
-            <button onClick={() => onLayout('TB')} className="p-1.5 text-gray-400 hover:text-white hover:bg-[#2a2a2a] rounded" title="Vertical Layout">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="6" y="3" width="12" height="6" rx="2" /><rect x="6" y="15" width="12" height="6" rx="2" /><path d="M12 9v6" /></svg>
+          {/* Layout Presets */}
+          <div className="flex items-center gap-1 bg-[#262626] rounded-lg p-1 border border-[#3d3d3d] mr-2">
+            <button onClick={() => onLayout('TB')} className="px-2 py-1.5 text-[10px] font-medium text-gray-400 hover:text-white hover:bg-[#3d3d3d] rounded transition-colors">
+              Tree
             </button>
-            <button onClick={() => onLayout('LR')} className="p-1.5 text-gray-400 hover:text-white hover:bg-[#2a2a2a] rounded" title="Horizontal Layout">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="6" width="6" height="12" rx="2" /><rect x="15" y="6" width="6" height="12" rx="2" /><path d="M9 12h6" /></svg>
+            <button onClick={() => onLayout('LR')} className="px-2 py-1.5 text-[10px] font-medium text-gray-400 hover:text-white hover:bg-[#3d3d3d] rounded transition-colors">
+              Mind Map
+            </button>
+            <button onClick={() => onLayout('TB')} className="px-2 py-1.5 text-[10px] font-medium text-gray-400 hover:text-white hover:bg-[#3d3d3d] rounded transition-colors">
+              Storyboard
             </button>
           </div>
 

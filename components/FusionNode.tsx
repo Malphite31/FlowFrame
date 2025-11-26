@@ -80,7 +80,7 @@ const FusionNode = ({ id, data: propData, selected }: NodeProps) => {
   const { updateNodeData } = useReactFlow();
   const { aspectRatio } = useSettings(); // Global Aspect Ratio
   const [isDragOver, setIsDragOver] = useState(false);
-  
+
   // State for Mood Node Aspect Ratio Lock
   const [keepRatio, setKeepRatio] = useState(true);
 
@@ -103,7 +103,7 @@ const FusionNode = ({ id, data: propData, selected }: NodeProps) => {
     const updates: Partial<StoryNodeData> = { label: editLabel };
     // For link nodes, ensure visible title is updated
     if (isLink) {
-        updates.linkTitle = editLabel;
+      updates.linkTitle = editLabel;
     }
     updateNodeData(id, updates);
     setIsEditing(false);
@@ -220,24 +220,24 @@ const FusionNode = ({ id, data: propData, selected }: NodeProps) => {
         <div className="p-3 flex flex-col gap-1">
           <div className="flex items-start justify-between gap-2">
             {isEditing ? (
-                 <input 
-                    value={editLabel}
-                    onChange={(e) => setEditLabel(e.target.value)}
-                    onBlur={submitEditing}
-                    onKeyDown={onEditKeyDown}
-                    autoFocus
-                    className="nodrag bg-transparent text-sm font-bold text-gray-200 border-b border-davinci-accent outline-none w-full"
-                    onClick={(e) => e.stopPropagation()}
-                    onMouseDown={(e) => e.stopPropagation()}
-                 />
+              <input
+                value={editLabel}
+                onChange={(e) => setEditLabel(e.target.value)}
+                onBlur={submitEditing}
+                onKeyDown={onEditKeyDown}
+                autoFocus
+                className="nodrag bg-transparent text-sm font-bold text-gray-200 border-b border-davinci-accent outline-none w-full"
+                onClick={(e) => e.stopPropagation()}
+                onMouseDown={(e) => e.stopPropagation()}
+              />
             ) : (
-                <span 
-                    onDoubleClick={startEditing}
-                    className="text-sm font-bold text-gray-200 leading-tight line-clamp-2 cursor-text hover:text-white transition-colors"
-                    title="Double click to rename"
-                >
-                    {data.linkTitle || data.label}
-                </span>
+              <span
+                onDoubleClick={startEditing}
+                className="text-sm font-bold text-gray-200 leading-tight line-clamp-2 cursor-text hover:text-white transition-colors"
+                title="Double click to rename"
+              >
+                {data.linkTitle || data.label}
+              </span>
             )}
             {/* External Link Icon Button */}
             <a
@@ -280,10 +280,10 @@ const FusionNode = ({ id, data: propData, selected }: NodeProps) => {
         onDrop={onDrop}
         className={`relative group h-full w-full transition-all duration-300 ease-out ${selected ? 'z-10' : ''}`}
       >
-        <NodeResizer 
-          color="#5e9aff" 
-          isVisible={selected} 
-          minWidth={100} 
+        <NodeResizer
+          color="#5e9aff"
+          isVisible={selected}
+          minWidth={100}
           minHeight={100}
           keepAspectRatio={keepRatio}
           handleStyle={{ width: 10, height: 10, borderRadius: 3 }}
@@ -291,22 +291,22 @@ const FusionNode = ({ id, data: propData, selected }: NodeProps) => {
 
         {/* Ratio Toggle Button (Visible when selected) */}
         {selected && (
-           <div className="absolute -top-7 right-0 flex gap-1 animate-in fade-in zoom-in-95 duration-200">
-               <button 
-                  onClick={(e) => { e.stopPropagation(); setKeepRatio(!keepRatio); }}
-                  className={`
+          <div className="absolute -top-7 right-0 flex gap-1 animate-in fade-in zoom-in-95 duration-200">
+            <button
+              onClick={(e) => { e.stopPropagation(); setKeepRatio(!keepRatio); }}
+              className={`
                     p-1.5 rounded-full text-xs flex items-center gap-1 shadow-lg border backdrop-blur-sm transition-all
                     ${keepRatio ? 'bg-davinci-accent text-[#000] border-davinci-accent' : 'bg-[#262626]/80 text-gray-400 border-[#3d3d3d] hover:text-white'}
                   `}
-                  title={keepRatio ? "Aspect Ratio Locked" : "Aspect Ratio Unlocked"}
-               >
-                 {keepRatio ? (
-                   <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg>
-                 ) : (
-                   <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 11V7a4 4 0 118 0m-4 8v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z"></path></svg>
-                 )}
-               </button>
-           </div>
+              title={keepRatio ? "Aspect Ratio Locked" : "Aspect Ratio Unlocked"}
+            >
+              {keepRatio ? (
+                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg>
+              ) : (
+                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 11V7a4 4 0 118 0m-4 8v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z"></path></svg>
+              )}
+            </button>
+          </div>
         )}
 
         <Handle
@@ -328,8 +328,8 @@ const FusionNode = ({ id, data: propData, selected }: NodeProps) => {
             data.mediaType === 'video' ? (
               <video src={data.image} className="w-full h-full object-contain" controls={false} muted loop />
             ) : data.mediaType === 'embed' ? (
-              <iframe 
-                src={data.image} 
+              <iframe
+                src={data.image}
                 className="w-full h-full border-0 pointer-events-none" // pointer-events-none allows dragging node easily
                 allow="autoplay; encrypted-media"
               />
@@ -367,13 +367,13 @@ const FusionNode = ({ id, data: propData, selected }: NodeProps) => {
   if (isIdea) {
     const shape = data.mindMapShape || 'rounded';
     const borderStyle = data.borderStyle || 'solid';
-    
+
     let shapeClasses = 'rounded-2xl px-6 py-4 min-w-[150px] max-w-[280px]'; // Default
     let contentClasses = 'flex flex-col gap-1.5 w-full';
 
     if (shape === 'circle') {
-        shapeClasses = 'rounded-full w-40 h-40 flex items-center justify-center p-4 aspect-square';
-        contentClasses = 'flex flex-col gap-1 w-full items-center justify-center';
+      shapeClasses = 'rounded-full w-40 h-40 flex items-center justify-center p-4 aspect-square';
+      contentClasses = 'flex flex-col gap-1 w-full items-center justify-center';
     }
     if (shape === 'capsule') shapeClasses = 'rounded-full px-8 py-4 min-w-[150px]';
     if (shape === 'square') shapeClasses = 'rounded-sm px-6 py-4 min-w-[150px] max-w-[280px]';
@@ -400,23 +400,23 @@ const FusionNode = ({ id, data: propData, selected }: NodeProps) => {
         />
         <div className={contentClasses}>
           {isEditing ? (
-             <input 
-                value={editLabel}
-                onChange={(e) => setEditLabel(e.target.value)}
-                onBlur={submitEditing}
-                onKeyDown={onEditKeyDown}
-                autoFocus
-                className="nodrag bg-transparent text-white text-sm font-bold text-center border-b border-white/50 outline-none w-full"
-                onClick={(e) => e.stopPropagation()}
-                onMouseDown={(e) => e.stopPropagation()}
-             />
+            <input
+              value={editLabel}
+              onChange={(e) => setEditLabel(e.target.value)}
+              onBlur={submitEditing}
+              onKeyDown={onEditKeyDown}
+              autoFocus
+              className="nodrag bg-transparent text-white text-sm font-bold text-center border-b border-white/50 outline-none w-full"
+              onClick={(e) => e.stopPropagation()}
+              onMouseDown={(e) => e.stopPropagation()}
+            />
           ) : (
-            <span 
-                onDoubleClick={startEditing}
-                className="text-sm font-bold text-white drop-shadow-sm tracking-wide cursor-text w-full block truncate select-none"
-                title="Double click to rename"
+            <span
+              onDoubleClick={startEditing}
+              className="text-sm font-bold text-white drop-shadow-sm tracking-wide cursor-text w-full block truncate select-none"
+              title="Double click to rename"
             >
-                {data.label}
+              {data.label}
             </span>
           )}
           {data.description && (
@@ -467,26 +467,26 @@ const FusionNode = ({ id, data: propData, selected }: NodeProps) => {
       <div className="w-full h-full rounded-lg overflow-hidden flex flex-col">
         {/* Node Header */}
         <div className={`px-3 py-1 border-b border-[#3d3d3d] flex justify-between items-center transition-colors ${selected ? 'bg-davinci-accent/10' : 'bg-[#1a1a1a]'}`}>
-          
+
           {isEditing ? (
-             <input 
-                value={editLabel}
-                onChange={(e) => setEditLabel(e.target.value)}
-                onBlur={submitEditing}
-                onKeyDown={onEditKeyDown}
-                autoFocus
-                className="nodrag bg-[#121212] text-white text-xs font-bold px-1 rounded border border-davinci-accent outline-none w-[85%]"
-                onClick={(e) => e.stopPropagation()}
-                onMouseDown={(e) => e.stopPropagation()}
-             />
+            <input
+              value={editLabel}
+              onChange={(e) => setEditLabel(e.target.value)}
+              onBlur={submitEditing}
+              onKeyDown={onEditKeyDown}
+              autoFocus
+              className="nodrag bg-[#121212] text-white text-xs font-bold px-1 rounded border border-davinci-accent outline-none w-[85%]"
+              onClick={(e) => e.stopPropagation()}
+              onMouseDown={(e) => e.stopPropagation()}
+            />
           ) : (
-             <span 
-                onDoubleClick={startEditing}
-                className={`text-xs font-bold truncate ${data.shotType ? 'w-[55%]' : 'w-[85%]'} ${selected ? 'text-davinci-accent' : 'text-gray-400'} cursor-text hover:text-white transition-colors select-none`} 
-                title={data.label}
-             >
-               {data.label || 'Untitled Node'}
-             </span>
+            <span
+              onDoubleClick={startEditing}
+              className={`text-xs font-bold truncate ${data.shotType ? 'w-[55%]' : 'w-[85%]'} ${selected ? 'text-davinci-accent' : 'text-gray-400'} cursor-text hover:text-white transition-colors select-none`}
+              title={data.label}
+            >
+              {data.label || 'Untitled Node'}
+            </span>
           )}
 
           <div className="flex items-center gap-2">
@@ -528,9 +528,9 @@ const FusionNode = ({ id, data: propData, selected }: NodeProps) => {
               {/* Embed Video Render */}
               {data.mediaType === 'embed' && (
                 <iframe
-                    src={data.image}
-                    className="w-full h-full border-0 pointer-events-none"
-                    title="Embedded Video"
+                  src={data.image}
+                  className="w-full h-full border-0 pointer-events-none"
+                  title="Embedded Video"
                 />
               )}
 
@@ -555,10 +555,68 @@ const FusionNode = ({ id, data: propData, selected }: NodeProps) => {
         </div>
 
         {/* Details / Script Snippet */}
-        <div className="p-2 bg-[#262626] flex-1">
-          <p className="text-[10px] text-gray-400 line-clamp-2 leading-tight">
+        {/* Details / Script Snippet & Checklist */}
+        <div className="p-2 bg-[#262626] flex-1 flex flex-col gap-2 overflow-y-auto custom-scrollbar">
+          <p className="text-[10px] text-gray-400 line-clamp-2 leading-tight min-h-[1.5em]">
             {data.description || "No script notes..."}
           </p>
+
+          {/* Checklist Section */}
+          <div className="flex flex-col gap-1 border-t border-[#3d3d3d] pt-2">
+            <div className="flex items-center justify-between">
+              <span className="text-[9px] font-bold text-gray-500 uppercase tracking-wider">Checklist</span>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  const newItem = { id: crypto.randomUUID(), text: 'New Item', checked: false };
+                  const currentList = data.checklist || [];
+                  updateNodeData(id, { checklist: [...currentList, newItem] });
+                }}
+                className="text-[9px] text-davinci-accent hover:text-white transition-colors"
+              >
+                + Add
+              </button>
+            </div>
+            <div className="flex flex-col gap-1">
+              {(data.checklist || []).map((item) => (
+                <div key={item.id} className="flex items-center gap-1.5 group/item">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      const currentList = data.checklist || [];
+                      const updated = currentList.map(i => i.id === item.id ? { ...i, checked: !i.checked } : i);
+                      updateNodeData(id, { checklist: updated });
+                    }}
+                    className={`w-3 h-3 rounded-sm border flex items-center justify-center transition-colors ${item.checked ? 'bg-davinci-accent border-davinci-accent' : 'border-gray-600 hover:border-gray-400'}`}
+                  >
+                    {item.checked && <svg className="w-2 h-2 text-black" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="4" d="M5 13l4 4L19 7" /></svg>}
+                  </button>
+                  <input
+                    value={item.text}
+                    onChange={(e) => {
+                      const currentList = data.checklist || [];
+                      const updated = currentList.map(i => i.id === item.id ? { ...i, text: e.target.value } : i);
+                      updateNodeData(id, { checklist: updated });
+                    }}
+                    className={`flex-1 bg-transparent text-[10px] outline-none border-none p-0 ${item.checked ? 'text-gray-600 line-through' : 'text-gray-300'}`}
+                    onClick={(e) => e.stopPropagation()}
+                    onMouseDown={(e) => e.stopPropagation()}
+                  />
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      const currentList = data.checklist || [];
+                      const updated = currentList.filter(i => i.id !== item.id);
+                      updateNodeData(id, { checklist: updated });
+                    }}
+                    className="opacity-0 group-hover/item:opacity-100 text-gray-600 hover:text-red-400 transition-opacity"
+                  >
+                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" /></svg>
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
       </div>
 

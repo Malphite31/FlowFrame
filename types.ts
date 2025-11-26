@@ -19,6 +19,9 @@ export interface StoryNodeData {
   mindMapShape?: 'rounded' | 'circle' | 'capsule' | 'square';
   borderStyle?: 'solid' | 'dashed' | 'dotted';
 
+  // Checklist
+  checklist?: { id: string; text: string; checked: boolean }[];
+
   // Link specific data
   linkUrl?: string;
   linkTitle?: string;
