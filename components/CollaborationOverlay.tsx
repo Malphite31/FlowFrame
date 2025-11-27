@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useReactFlow } from '@xyflow/react';
 import { useCollaborativeCursors } from '../hooks/useCollaborativeCursors';
 import { CollaborativeCursors } from './CollaborativeCursors';
@@ -16,7 +16,9 @@ export const CollaborationOverlay: React.FC<CollaborationOverlayProps> = ({ proj
     // -- Cursor Chat State --
     const [isCursorChatActive, setIsCursorChatActive] = useState(false);
     const [chatMessage, setChatMessage] = useState('');
-    const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
+
+    // Ref for local cursor to bypass React render cycle for movement
+    const localCursorRef = useRef<HTMLDivElement>(null);
 
     // -- Collaborator Notification --
     useEffect(() => {
@@ -91,10 +93,16 @@ export const CollaborationOverlay: React.FC<CollaborationOverlayProps> = ({ proj
             // Only track if we have a project open
             if (!projectId) return;
 
-            const pos = screenToFlowPosition({ x: e.clientX, y: e.clientY });
-            setMousePos(pos);
+            // 1. Instant Local Update (Bypass React Render Cycle)
+            if (localCursorRef.current) {
+                localCursorRef.current.style.transform = `translate3d(${e.clientX}px, ${e.clientY}px, 0)`;
+            }
 
-            // Broadcast
+            // 2. Broadcast (Flow Coordinates)
+            // We throttle this slightly implicitly by React state updates if we were using state, 
+            // but here we just call it. The hook might handle throttling.
+            const pos = screenToFlowPosition({ x: e.clientX, y: e.clientY });
+
             broadcastMove(pos.x, pos.y, isCursorChatActive || chatMessage ? chatMessage : undefined);
         };
 
@@ -103,27 +111,72 @@ export const CollaborationOverlay: React.FC<CollaborationOverlayProps> = ({ proj
     }, [projectId, screenToFlowPosition, broadcastMove, isCursorChatActive, chatMessage]);
 
 
+
+
     // -- Hide Default Cursor --
-    const shouldHideCursor = cursors.length > 0 || isCursorChatActive;
+    const shouldHideCursor = cursors.length > 0 || isCursorChatActive || true; // Always hide if we want custom cursor for self
 
     return (
         <>
             {shouldHideCursor && (
                 <style>{`
-          .react-flow, 
-          .react-flow__pane,
-          .react-flow__node,
-          .react-flow__edge,
-          .react-flow__handle,
-          .react-flow * {
+          body,
+          body * {
             cursor: none !important;
           }
         `}</style>
             )}
 
+            {/* Local Cursor (Direct DOM) */}
+            <div
+                ref={localCursorRef}
+                className="fixed top-0 left-0 pointer-events-none z-[10000] flex flex-col items-start transition-none will-change-transform"
+                style={{ transform: 'translate3d(-100px, -100px, 0)' }} // Start off-screen
+            >
+                <svg
+                    width="24"
+                    height="24"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    xmlns="http://www.w3.org/2000/svg"
+                    className="drop-shadow-md"
+                    style={{ transform: 'translate(-1px, -1px)' }}
+                >
+                    <path
+                        d="M3 3L10.07 19.97L12.58 12.58L19.97 10.07L3 3Z"
+                        fill={me.color}
+                        stroke="white"
+                        strokeWidth="1.5"
+                        strokeLinejoin="round"
+                    />
+                </svg>
+
+                {(isCursorChatActive || chatMessage) ? (
+                    <div
+                        className="ml-0 px-3 py-2 rounded-xl rounded-tl-none text-sm font-medium shadow-lg whitespace-nowrap z-50"
+                        style={{
+                            backgroundColor: me.color,
+                            color: ['#FDE047', '#86EFAC', '#93C5FD', '#FCA5A5', '#D8B4FE'].includes(me.color) ? '#000' : '#fff'
+                        }}
+                    >
+                        {chatMessage}
+                    </div>
+                ) : (
+                    <div
+                        className="ml-2 mt-2 px-2 py-0.5 rounded-full text-[10px] font-bold whitespace-nowrap shadow-sm border border-white/20"
+                        style={{
+                            backgroundColor: me.color,
+                            color: ['#FDE047', '#86EFAC', '#93C5FD', '#FCA5A5', '#D8B4FE'].includes(me.color) ? '#000' : '#fff'
+                        }}
+                    >
+                        {me.name}
+                    </div>
+                )}
+            </div>
+
             <CollaborativeCursors
                 cursors={cursors}
-                myCursor={isCursorChatActive || chatMessage ? { ...me, x: mousePos.x, y: mousePos.y, message: chatMessage, lastUpdate: Date.now() } : undefined}
+                myCursor={undefined}
             />
         </>
     );

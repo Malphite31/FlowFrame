@@ -1755,6 +1755,9 @@ const AppContent = () => {
             aspectRatio={aspectRatio}
           />
         )}
+
+        {/* Collaborative Cursors Overlay - Placed last to be on top */}
+        <CollaborationOverlay projectId={activeProjectId} me={me} />
       </div>
     </SettingsContext.Provider>
   );

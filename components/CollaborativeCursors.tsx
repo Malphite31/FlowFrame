@@ -13,7 +13,7 @@ export const CollaborativeCursors: React.FC<CollaborativeCursorsProps> = ({ curs
     const allCursors = myCursor ? [...cursors, myCursor] : cursors;
 
     return (
-        <div className="fixed inset-0 pointer-events-none z-50 overflow-hidden">
+        <div className="fixed inset-0 pointer-events-none z-[9999] overflow-hidden">
             {allCursors.map(cursor => {
                 const screenPos = flowToScreenPosition({ x: cursor.x, y: cursor.y });
                 const isMe = cursor.id === myCursor?.id;
@@ -49,7 +49,7 @@ export const CollaborativeCursors: React.FC<CollaborativeCursorsProps> = ({ curs
                         {/* Chat Bubble */}
                         {cursor.message ? (
                             <div
-                                className="ml-4 -mt-6 px-3 py-2 rounded-xl rounded-tl-none text-sm font-medium shadow-lg whitespace-nowrap z-50"
+                                className={`px-3 py-2 rounded-xl rounded-tl-none text-sm font-medium shadow-lg whitespace-nowrap z-50 ${isMe ? 'ml-0' : 'ml-4 -mt-6'}`}
                                 style={{
                                     backgroundColor: cursor.color,
                                     color: ['#FDE047', '#86EFAC', '#93C5FD', '#FCA5A5', '#D8B4FE'].includes(cursor.color) ? '#000' : '#fff'
@@ -60,7 +60,7 @@ export const CollaborativeCursors: React.FC<CollaborativeCursorsProps> = ({ curs
                         ) : (
                             /* Name Tag */
                             <div
-                                className="ml-4 -mt-4 px-2 py-0.5 rounded-full text-[10px] font-bold whitespace-nowrap shadow-sm border border-white/20"
+                                className={`px-2 py-0.5 rounded-full text-[10px] font-bold whitespace-nowrap shadow-sm border border-white/20 ${isMe ? 'ml-2 mt-2' : 'ml-4 -mt-4'}`}
                                 style={{
                                     backgroundColor: cursor.color,
                                     color: ['#FDE047', '#86EFAC', '#93C5FD', '#FCA5A5', '#D8B4FE'].includes(cursor.color) ? '#000' : '#fff'
