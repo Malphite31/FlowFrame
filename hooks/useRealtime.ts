@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { UserIdentity } from './useCollaborativeIdentity';
+import { NodeChange, EdgeChange } from '@xyflow/react';
 
 const SOCKET_URL = 'http://localhost:3002';
 
@@ -14,7 +15,17 @@ export interface UserCursor {
     message?: string;
 }
 
-export const useCollaborativeCursors = (projectId: string | null, me: UserIdentity) => {
+import { ViewMode } from '../types';
+
+export const useRealtime = (
+    projectId: string | null,
+    me: UserIdentity,
+    onRemoteNodeChanges?: (changes: NodeChange[]) => void,
+    onRemoteEdgeChanges?: (changes: EdgeChange[]) => void,
+    onGetLocalState?: () => { nodes: any[], edges: any[], viewMode: ViewMode },
+    onRestoreState?: (state: { nodes: any[], edges: any[], viewMode: ViewMode }) => void,
+    onRemoteViewModeChange?: (mode: ViewMode) => void
+) => {
     const [socket, setSocket] = useState<Socket | null>(null);
     const [cursors, setCursors] = useState<UserCursor[]>([]);
 
@@ -32,6 +43,8 @@ export const useCollaborativeCursors = (projectId: string | null, me: UserIdenti
             console.log('Connected to collab server');
             if (projectId) {
                 newSocket.emit('join', { ...me, projectId });
+                // Request initial state from peers
+                newSocket.emit('request-state', projectId);
             }
         });
 
@@ -43,6 +56,36 @@ export const useCollaborativeCursors = (projectId: string | null, me: UserIdenti
                 }
                 return [...prev, data];
             });
+        });
+
+        newSocket.on('node-change', (changes: NodeChange[]) => {
+            if (onRemoteNodeChanges) onRemoteNodeChanges(changes);
+        });
+
+        newSocket.on('edge-change', (changes: EdgeChange[]) => {
+            if (onRemoteEdgeChanges) onRemoteEdgeChanges(changes);
+        });
+
+        newSocket.on('view-mode-change', (mode: ViewMode) => {
+            if (onRemoteViewModeChange) onRemoteViewModeChange(mode);
+        });
+
+        // -- State Sync Handlers --
+        newSocket.on('request-state', (requesterSocketId: string) => {
+            if (onGetLocalState) {
+                const state = onGetLocalState();
+                // Only send if we actually have something (basic check)
+                if (state.nodes.length > 0) {
+                    newSocket.emit('sync-state', { targetSocketId: requesterSocketId, state });
+                }
+            }
+        });
+
+        newSocket.on('receive-state', (state: { nodes: any[], edges: any[], viewMode: ViewMode }) => {
+            console.log('Received state sync from peer', state);
+            if (onRestoreState) {
+                onRestoreState(state);
+            }
         });
 
         newSocket.on('user-joined', (user: { name: string }) => {
@@ -59,17 +102,17 @@ export const useCollaborativeCursors = (projectId: string | null, me: UserIdenti
         return () => {
             newSocket.disconnect();
         };
-    }, []); // Only run once on mount (or if projectId changes? No, we handle projectId changes below)
+    }, []); // Run once
 
-    // Handle Project ID changes and Identity changes
+    // Handle Project ID changes
     useEffect(() => {
         if (socket && projectId) {
-            // Re-announce presence when project or identity changes
             socket.emit('join', { ...me, projectId });
+            socket.emit('request-state', projectId);
         }
     }, [socket, projectId, me.name, me.color]);
 
-    // Clean up stale cursors (inactive for > 10s)
+    // Clean up stale cursors
     useEffect(() => {
         const interval = setInterval(() => {
             const now = Date.now();
@@ -80,9 +123,7 @@ export const useCollaborativeCursors = (projectId: string | null, me: UserIdenti
 
     const broadcastMove = useCallback((x: number, y: number, message?: string) => {
         if (!socket || !projectId) return;
-
         const now = Date.now();
-        // If message is changing, don't throttle
         if (!message && now - throttleRef.current < 30) return;
         throttleRef.current = now;
 
@@ -98,5 +139,20 @@ export const useCollaborativeCursors = (projectId: string | null, me: UserIdenti
         });
     }, [socket, me, projectId]);
 
-    return { cursors, broadcastMove };
+    const broadcastNodeChange = useCallback((changes: NodeChange[]) => {
+        if (!socket || !projectId) return;
+        socket.emit('node-change', { projectId, changes });
+    }, [socket, projectId]);
+
+    const broadcastEdgeChange = useCallback((changes: EdgeChange[]) => {
+        if (!socket || !projectId) return;
+        socket.emit('edge-change', { projectId, changes });
+    }, [socket, projectId]);
+
+    const broadcastViewModeChange = useCallback((mode: ViewMode) => {
+        if (!socket || !projectId) return;
+        socket.emit('view-mode-change', { projectId, mode });
+    }, [socket, projectId]);
+
+    return { cursors, broadcastMove, broadcastNodeChange, broadcastEdgeChange, broadcastViewModeChange };
 };

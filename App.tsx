@@ -42,6 +42,7 @@ import { SettingsContext } from './context/SettingsContext';
 import MobileWarning from './components/MobileWarning';
 import { CollaborativeCursors } from './components/CollaborativeCursors';
 import { CollaborationOverlay } from './components/CollaborationOverlay';
+import { useRealtime } from './hooks/useRealtime';
 import { useCollaborativeIdentity } from './hooks/useCollaborativeIdentity';
 
 
@@ -180,15 +181,10 @@ const AppContent = () => {
     const projectIdFromUrl = params.get('project');
 
     if (projectIdFromUrl) {
-      const existingProject = projects.find(p => p.id === projectIdFromUrl);
+      // 1. Ensure project exists in state (for shared links)
+      setProjects(prev => {
+        if (prev.find(p => p.id === projectIdFromUrl)) return prev;
 
-      if (existingProject) {
-        setActiveProjectId(projectIdFromUrl);
-        setShowDashboard(false);
-      } else {
-        // If project doesn't exist locally (shared link), create a placeholder 
-        // so users can at least collaborate in the same "room".
-        // In a real app, we would fetch project data from the server here.
         const newSharedProject: ProjectRecord = {
           id: projectIdFromUrl,
           name: 'Shared Project',
@@ -203,10 +199,12 @@ const AppContent = () => {
           createdAt: Date.now(),
           isArchived: false
         };
-        setProjects(prev => [...prev, newSharedProject]);
-        setActiveProjectId(projectIdFromUrl);
-        setShowDashboard(false);
-      }
+        return [...prev, newSharedProject];
+      });
+
+      // 2. Migrate to Hash Routing immediately
+      // This removes the ?project= param and sets the hash, which triggers the main router
+      window.history.replaceState(null, '', `${window.location.pathname}#/projects/${projectIdFromUrl}`);
     }
   }, []); // Run once on mount
 
@@ -245,6 +243,61 @@ const AppContent = () => {
 
   // -- Collaborative Identity --
   const { me, updateName } = useCollaborativeIdentity();
+
+  // -- Realtime Collaboration --
+  // Refs to hold latest state for callbacks without triggering re-renders
+  const nodesRef = useRef(nodes);
+  const edgesRef = useRef(edges);
+  const viewModeRef = useRef(viewMode);
+
+  useEffect(() => {
+    nodesRef.current = nodes;
+    edgesRef.current = edges;
+    viewModeRef.current = viewMode;
+  }, [nodes, edges, viewMode]);
+
+  const handleRemoteNodeChanges = useCallback((changes: NodeChange[]) => {
+    setNodes((nds) => applyNodeChanges(changes, nds) as Node<StoryNodeData>[]);
+  }, []);
+
+  const handleRemoteEdgeChanges = useCallback((changes: EdgeChange[]) => {
+    setEdges((eds) => applyEdgeChanges(changes, eds));
+  }, []);
+
+  const handleRemoteViewModeChange = useCallback((mode: ViewMode) => {
+    setViewMode(mode);
+    // Also update project record to reflect this change
+    if (activeProjectId) {
+      setProjects(prev => prev.map(p => p.id === activeProjectId ? { ...p, viewMode: mode } : p));
+    }
+  }, [activeProjectId]);
+
+  const handleGetLocalState = useCallback(() => {
+    return { nodes: nodesRef.current, edges: edgesRef.current, viewMode: viewModeRef.current };
+  }, []);
+
+  const handleRestoreState = useCallback((state: { nodes: any[], edges: any[], viewMode: ViewMode }) => {
+    if (state.nodes && state.edges) {
+      setNodes(state.nodes);
+      setEdges(state.edges);
+      // Also update history so undo works from this point
+      setHistory([{ nodes: state.nodes, edges: state.edges }]);
+      setHistoryIndex(0);
+    }
+    if (state.viewMode) {
+      setViewMode(state.viewMode);
+    }
+  }, []);
+
+  const { cursors, broadcastMove, broadcastNodeChange, broadcastEdgeChange, broadcastViewModeChange } = useRealtime(
+    activeProjectId,
+    me,
+    handleRemoteNodeChanges,
+    handleRemoteEdgeChanges,
+    handleGetLocalState,
+    handleRestoreState,
+    handleRemoteViewModeChange
+  );
 
   // -- Settings Context Value --
   const settingsValue = useMemo(() => ({ aspectRatio }), [aspectRatio]);
@@ -476,7 +529,8 @@ const AppContent = () => {
     }
 
     setViewMode(mode);
-  }, [viewMode, nodes, edges, activeProjectId, projects]);
+    broadcastViewModeChange(mode);
+  }, [viewMode, nodes, edges, activeProjectId, projects, broadcastViewModeChange]);
 
   const handleSetProjectNotes = useCallback((notes: string) => {
     setProjectNotes(notes);
@@ -875,13 +929,19 @@ const AppContent = () => {
   }, [isPresentationOpen]);
 
   const onNodesChange = useCallback(
-    (changes: NodeChange[]) => setNodes((nds) => applyNodeChanges(changes, nds) as Node<StoryNodeData>[]),
-    []
+    (changes: NodeChange[]) => {
+      setNodes((nds) => applyNodeChanges(changes, nds) as Node<StoryNodeData>[]);
+      broadcastNodeChange(changes);
+    },
+    [broadcastNodeChange]
   );
 
   const onEdgesChange = useCallback(
-    (changes: EdgeChange[]) => setEdges((eds) => applyEdgeChanges(changes, eds)),
-    []
+    (changes: EdgeChange[]) => {
+      setEdges((eds) => applyEdgeChanges(changes, eds));
+      broadcastEdgeChange(changes);
+    },
+    [broadcastEdgeChange]
   );
 
   const onConnect = useCallback(
@@ -1757,7 +1817,12 @@ const AppContent = () => {
         )}
 
         {/* Collaborative Cursors Overlay - Placed last to be on top */}
-        <CollaborationOverlay projectId={activeProjectId} me={me} />
+        <CollaborationOverlay
+          projectId={activeProjectId}
+          me={me}
+          cursors={cursors}
+          broadcastMove={broadcastMove}
+        />
       </div>
     </SettingsContext.Provider>
   );

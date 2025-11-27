@@ -1,17 +1,19 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useReactFlow } from '@xyflow/react';
-import { useCollaborativeCursors } from '../hooks/useCollaborativeCursors';
+import { UserCursor } from '../hooks/useRealtime';
 import { CollaborativeCursors } from './CollaborativeCursors';
 import { UserIdentity } from '../hooks/useCollaborativeIdentity';
 
 interface CollaborationOverlayProps {
     projectId: string | null;
     me: UserIdentity;
+    cursors: UserCursor[];
+    broadcastMove: (x: number, y: number, message?: string) => void;
 }
 
-export const CollaborationOverlay: React.FC<CollaborationOverlayProps> = ({ projectId, me }) => {
+export const CollaborationOverlay: React.FC<CollaborationOverlayProps> = ({ projectId, me, cursors, broadcastMove }) => {
     const { screenToFlowPosition } = useReactFlow();
-    const { cursors, broadcastMove } = useCollaborativeCursors(projectId, me);
+    // Hook moved to App.tsx for shared state management
 
     // -- Cursor Chat State --
     const [isCursorChatActive, setIsCursorChatActive] = useState(false);
@@ -46,7 +48,7 @@ export const CollaborationOverlay: React.FC<CollaborationOverlayProps> = ({ proj
                 if (e.key === 'Escape' && isCursorChatActive) {
                     setIsCursorChatActive(false);
                     setChatMessage('');
-                    broadcastMove(0, 0, '');
+                    if (broadcastMove) broadcastMove(0, 0, '');
                 }
                 return;
             }
@@ -64,18 +66,18 @@ export const CollaborationOverlay: React.FC<CollaborationOverlayProps> = ({ proj
                     setIsCursorChatActive(false);
                     setTimeout(() => {
                         setChatMessage('');
-                        broadcastMove(0, 0, '');
+                        if (broadcastMove) broadcastMove(0, 0, '');
                     }, 3000);
                 } else if (e.key === 'Backspace') {
                     setChatMessage(prev => {
                         const next = prev.slice(0, -1);
-                        broadcastMove(0, 0, next);
+                        if (broadcastMove) broadcastMove(0, 0, next);
                         return next;
                     });
                 } else if (e.key.length === 1) {
                     setChatMessage(prev => {
                         const next = prev + e.key;
-                        broadcastMove(0, 0, next);
+                        if (broadcastMove) broadcastMove(0, 0, next);
                         return next;
                     });
                 }
@@ -103,7 +105,9 @@ export const CollaborationOverlay: React.FC<CollaborationOverlayProps> = ({ proj
             // but here we just call it. The hook might handle throttling.
             const pos = screenToFlowPosition({ x: e.clientX, y: e.clientY });
 
-            broadcastMove(pos.x, pos.y, isCursorChatActive || chatMessage ? chatMessage : undefined);
+            if (broadcastMove) {
+                broadcastMove(pos.x, pos.y, isCursorChatActive || chatMessage ? chatMessage : undefined);
+            }
         };
 
         window.addEventListener('mousemove', handleMouseMove);
@@ -114,7 +118,7 @@ export const CollaborationOverlay: React.FC<CollaborationOverlayProps> = ({ proj
 
 
     // -- Hide Default Cursor --
-    const shouldHideCursor = cursors.length > 0 || isCursorChatActive || true; // Always hide if we want custom cursor for self
+    const shouldHideCursor = (cursors?.length || 0) > 0 || isCursorChatActive || true; // Always hide if we want custom cursor for self
 
     return (
         <>

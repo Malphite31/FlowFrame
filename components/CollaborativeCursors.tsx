@@ -1,6 +1,6 @@
 import React from 'react';
 import { useReactFlow } from '@xyflow/react';
-import { UserCursor } from '../hooks/useCollaborativeCursors';
+import { UserCursor } from '../hooks/useRealtime';
 
 interface CollaborativeCursorsProps {
     cursors: UserCursor[];
@@ -10,7 +10,7 @@ interface CollaborativeCursorsProps {
 export const CollaborativeCursors: React.FC<CollaborativeCursorsProps> = ({ cursors, myCursor }) => {
     const { flowToScreenPosition } = useReactFlow();
 
-    const allCursors = myCursor ? [...cursors, myCursor] : cursors;
+    const allCursors = myCursor ? [...(cursors || []), myCursor] : (cursors || []);
 
     return (
         <div className="fixed inset-0 pointer-events-none z-[9999] overflow-hidden">
